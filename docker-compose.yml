@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  research-machine:
+    build: .
+    container_name: research-publishing-machine
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    volumes:
+      - ./output:/app/output
+      - ./logs:/app/logs
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1

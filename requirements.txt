@@ -1,0 +1,28 @@
+# Core Dependencies
+python-dotenv==1.0.0
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# LLM APIs
+anthropic==0.18.1
+google-generativeai==0.3.2
+
+# Web Search
+tavily-python==0.3.3
+
+# LangGraph & LangChain
+langgraph==0.0.32
+langchain>=0.1.6
+langchain-core>=0.1.38
+
+# PDF & LaTeX
+pypdf==4.0.1
+pdf2image==1.17.0
+pillow==10.2.0
+
+# Streamlit UI
+streamlit==1.31.0
+
+# Utilities
+aiohttp==3.9.3
+tenacity==8.2.3
