@@ -6,8 +6,9 @@ Unified interface for Claude (Anthropic) and Gemini (Google) APIs
 import logging
 from typing import Optional
 from anthropic import Anthropic
-import google.generativeai as genai
-from tenacity import retry, stop_after_attempt, wait_exponential
+from google import genai
+from google.genai import types
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from .config import config
 
@@ -21,9 +22,11 @@ logger = logging.getLogger(__name__)
 # Anthropic Claude
 anthropic_client = Anthropic(api_key=config.ANTHROPIC_API_KEY) if config.ANTHROPIC_API_KEY else None
 
-# Google Gemini
+# Google Gemini - Initialize new client
 if config.GOOGLE_API_KEY:
-    genai.configure(api_key=config.GOOGLE_API_KEY)
+    gemini_client = genai.Client(api_key=config.GOOGLE_API_KEY)
+else:
+    gemini_client = None
 
 
 # ═══════════════════════════════════════════════════════════
@@ -35,6 +38,12 @@ if config.GOOGLE_API_KEY:
     wait=wait_exponential(multiplier=1, min=2, max=10),
     reraise=True
 )
+@retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=2, min=4, max=60),
+    reraise=True,
+    retry=retry_if_exception_type((Exception,))
+)
 def call_claude_api(
     prompt: str,
     system_prompt: str,
@@ -42,7 +51,7 @@ def call_claude_api(
     max_tokens: Optional[int] = None
 ) -> str:
     """
-    Call Claude API with retry logic
+    Call Claude API with retry logic (5 attempts with exponential backoff)
 
     Args:
         prompt: User message
@@ -78,7 +87,7 @@ def call_claude_api(
         return text
 
     except Exception as e:
-        logger.error(f"Claude API error: {e}")
+        logger.warning(f"Claude API error (will retry): {e}")
         raise
 
 
@@ -98,7 +107,7 @@ def call_gemini_api(
     max_tokens: Optional[int] = None
 ) -> str:
     """
-    Call Gemini API with retry logic
+    Call Gemini API with retry logic (using new google.genai package)
 
     Args:
         prompt: User message
@@ -112,7 +121,7 @@ def call_gemini_api(
     Raises:
         Exception: If API call fails after retries
     """
-    if not config.GOOGLE_API_KEY:
+    if not gemini_client:
         raise ValueError("Google API key not configured")
 
     temp = temperature if temperature is not None else config.GEMINI_TEMPERATURE
@@ -121,18 +130,32 @@ def call_gemini_api(
     logger.debug(f"Calling Gemini API (temp={temp}, max_tokens={tokens})")
 
     try:
-        model = genai.GenerativeModel(
-            model_name=config.GEMINI_MODEL,
-            generation_config={
-                "temperature": temp,
-                "max_output_tokens": tokens,
-            }
+        # Use new API with system instruction support
+        # Note: Gemini 2.5 Pro may use thinking tokens internally
+        # ✅ Google Search Grounding enabled
+        response = gemini_client.models.generate_content(
+            model=config.GEMINI_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=temp,
+                max_output_tokens=tokens,
+                system_instruction=system_prompt,
+                tools=[types.Tool(google_search=types.GoogleSearch())]
+            )
         )
 
-        # Combine system prompt and user prompt for older API versions
-        full_prompt = f"System: {system_prompt}\n\nUser: {prompt}"
-        response = model.generate_content(full_prompt)
-        text = response.text
+        # Extract text from response - handle different response structures
+        if response.text:
+            text = response.text
+        elif response.candidates and len(response.candidates) > 0:
+            candidate = response.candidates[0]
+            if candidate.content and candidate.content.parts:
+                text = candidate.content.parts[0].text
+            else:
+                raise ValueError("No content in response candidate")
+        else:
+            raise ValueError("No valid response from Gemini API")
+
         logger.debug(f"Gemini response: {len(text)} chars")
         return text
 
@@ -157,7 +180,7 @@ def call_gemini_vision_api(
     temperature: Optional[float] = None
 ) -> str:
     """
-    Call Gemini Vision API for image analysis
+    Call Gemini Vision API for image analysis (using new google.genai package)
 
     Args:
         prompt: User message
@@ -171,7 +194,7 @@ def call_gemini_vision_api(
     Raises:
         Exception: If API call fails after retries
     """
-    if not config.GOOGLE_API_KEY:
+    if not gemini_client:
         raise ValueError("Google API key not configured")
 
     temp = temperature if temperature is not None else config.GEMINI_TEMPERATURE
@@ -179,19 +202,29 @@ def call_gemini_vision_api(
     logger.debug(f"Calling Gemini Vision API (temp={temp})")
 
     try:
-        # Create image part
+        # Create image part from bytes
         import PIL.Image
         import io
         image = PIL.Image.open(io.BytesIO(image_data))
 
-        model = genai.GenerativeModel(
-            model_name=config.GEMINI_MODEL,
-            generation_config={"temperature": temp}
+        # Convert PIL Image to bytes for new API
+        img_byte_arr = io.BytesIO()
+        image.save(img_byte_arr, format='PNG')
+        img_byte_arr = img_byte_arr.getvalue()
+
+        # Use new API with multimodal input
+        response = gemini_client.models.generate_content(
+            model=config.GEMINI_MODEL,
+            contents=[
+                types.Part.from_bytes(data=img_byte_arr, mime_type="image/png"),
+                prompt
+            ],
+            config=types.GenerateContentConfig(
+                temperature=temp,
+                system_instruction=system_prompt
+            )
         )
 
-        # Combine system prompt with user prompt
-        full_prompt = f"System: {system_prompt}\n\nUser: {prompt}"
-        response = model.generate_content([full_prompt, image])
         text = response.text
         logger.debug(f"Gemini Vision response: {len(text)} chars")
         return text

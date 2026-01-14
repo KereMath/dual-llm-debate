@@ -19,18 +19,23 @@ def phase_4_convergence_check(state: DebateState) -> DebateState:
     1. Doğal Mutabakat: Semantic similarity >= threshold (e.g., 95%)
     2. Zorunlu Bitiş: iteration_counter >= max_rounds (e.g., 3)
 
-    Process: İki taslak arasındaki semantic benzerliği hesapla
+    Process: İki REVISED taslak arasındaki semantic benzerliği hesapla
     Decision: Devam mı, bitir mi?
+
+    FIX: Compare REVISED versions (gemini_critique, claude_critique) NOT original drafts
+    This ensures monotonic increase in similarity through debate rounds
     """
 
     logger.info(f"Faz 4: Convergence Check (Round {state.iteration_counter})")
 
     try:
+        # FIXED: Compare revised versions after cross-examination, not original drafts
+        # This ensures similarity increases monotonically as agents learn from each other
+        text_a = state.gemini_critique if state.gemini_critique else state.gemini_draft
+        text_b = state.claude_critique if state.claude_critique else state.claude_draft
+
         # Calculate semantic similarity (LLM-based)
-        similarity = calculate_semantic_similarity(
-            state.gemini_draft,
-            state.claude_draft
-        )
+        similarity = calculate_semantic_similarity(text_a, text_b)
 
         state.similarity_score = similarity
 

@@ -13,7 +13,7 @@ try:
         prompt="Explain quantum computing in one sentence.",
         system_prompt="You are a helpful assistant. Be concise.",
         temperature=0.5,
-        max_tokens=100
+        max_tokens=8192  # High limit for Gemini 2.5 Pro thinking tokens
     )
     print(f"\n[OK] Gemini works!")
     print(f"Response: {response}")

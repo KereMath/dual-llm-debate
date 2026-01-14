@@ -148,6 +148,25 @@ class DebateState(BaseModel):
     web_context: Optional[WebContext] = Field(default=None, description="Parsed web results")
 
     # ───────────────────────────────────────────────────────
+    # ITERATIVE DEBATE TRACKING (SOTA Enhancement)
+    # ───────────────────────────────────────────────────────
+
+    debate_rounds: List["DebateRound"] = Field(
+        default_factory=list,
+        description="History of all debate rounds"
+    )
+
+    locked_agreements: List["LockedClaim"] = Field(
+        default_factory=list,
+        description="Claims both agents agreed on (won't be redebated)"
+    )
+
+    current_disputed_points: List[str] = Field(
+        default_factory=list,
+        description="Points still under debate"
+    )
+
+    # ───────────────────────────────────────────────────────
     # HELPERS
     # ───────────────────────────────────────────────────────
 
@@ -160,6 +179,28 @@ class DebateState(BaseModel):
         if self.start_time and self.end_time:
             return (self.end_time - self.start_time).total_seconds()
         return 0.0
+
+    def get_latest_gemini_answer(self) -> str:
+        """Get most recent Gemini answer"""
+        if self.debate_rounds:
+            return self.debate_rounds[-1].gemini_answer
+        return self.gemini_draft
+
+    def get_latest_claude_answer(self) -> str:
+        """Get most recent Claude answer"""
+        if self.debate_rounds:
+            return self.debate_rounds[-1].claude_answer
+        return self.claude_draft
+
+    def add_debate_round(self, round_data: "DebateRound"):
+        """Add new debate round and update state"""
+        self.debate_rounds.append(round_data)
+        self.similarity_score = round_data.consensus_score
+        self.iteration_counter = round_data.round_num
+
+        # Update convergence status
+        if round_data.convergence_status == "converged":
+            self.converged = True
 
     class Config:
         arbitrary_types_allowed = True
@@ -192,8 +233,57 @@ class VisualQAScore(QAScore):
 class ContentQAScore(QAScore):
     """
     Content quality assessment (Claude Text)
+    Updated weights: Completeness 35, Citations 25, Structure 20, Academic 20
     """
-    completeness_score: float = Field(default=0.0, ge=0, le=30)
-    citation_score: float = Field(default=0.0, ge=0, le=30)
+    completeness_score: float = Field(default=0.0, ge=0, le=35)  # Increased from 30
+    citation_score: float = Field(default=0.0, ge=0, le=25)      # Decreased from 30
     structure_score: float = Field(default=0.0, ge=0, le=20)
     academic_score: float = Field(default=0.0, ge=0, le=20)
+
+
+# ═══════════════════════════════════════════════════════════
+# ITERATIVE DEBATE SCHEMAS (SOTA Enhancement)
+# ═══════════════════════════════════════════════════════════
+
+class ComparisonClaim(BaseModel):
+    """
+    Single claim in line-by-line comparison table
+    Used for structured consensus tracking
+    """
+    claim_id: int = Field(description="Unique claim identifier")
+    gemini_statement: str = Field(description="Gemini's version of this claim")
+    claude_statement: str = Field(description="Claude's version of this claim")
+    gemini_source: Optional[str] = Field(default=None, description="Gemini's source URL")
+    claude_source: Optional[str] = Field(default=None, description="Claude's source URL")
+    status: Literal["agree", "conflict", "partial"] = Field(description="Agreement status")
+    resolution: str = Field(description="Resolved/final version of claim")
+    confidence_gemini: float = Field(default=0.8, ge=0, le=1, description="Gemini's confidence")
+    confidence_claude: float = Field(default=0.8, ge=0, le=1, description="Claude's confidence")
+
+
+class DebateRound(BaseModel):
+    """
+    Single round of iterative comparative debate
+    Tracks full state of one debate iteration
+    """
+    round_num: int = Field(description="Round number (1, 2, 3...)")
+    gemini_answer: str = Field(description="Gemini's answer this round")
+    claude_answer: str = Field(description="Claude's answer this round")
+    comparison_table: List[ComparisonClaim] = Field(default_factory=list, description="Claim-by-claim comparison")
+    consensus_score: float = Field(default=0.0, ge=0, le=1, description="LLM-calculated consensus (0-1)")
+    new_agreements: List[str] = Field(default_factory=list, description="Newly agreed claims this round")
+    disputed_points: List[str] = Field(default_factory=list, description="Still disputed claims")
+    convergence_status: Literal["continue", "converged"] = Field(description="Should debate continue?")
+    next_focus: Optional[str] = Field(default=None, description="What to focus on next round")
+
+
+class LockedClaim(BaseModel):
+    """
+    A claim that both agents agreed on with high confidence
+    Locked claims are not re-debated in future rounds
+    """
+    statement: str = Field(description="The agreed-upon statement")
+    source_gemini: Optional[str] = Field(default=None)
+    source_claude: Optional[str] = Field(default=None)
+    locked_round: int = Field(description="Round when this was locked")
+    confidence_avg: float = Field(ge=0, le=1, description="Average confidence when locked")

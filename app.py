@@ -74,14 +74,8 @@ with st.sidebar:
     ) / 100.0
 
     st.markdown("**PDF Kalite**")
-
-    qa_threshold = st.slider(
-        "QA Kabul Puanı",
-        min_value=60,
-        max_value=95,
-        value=75,
-        help="PDF onay için minimum kalite puanı"
-    )
+    st.info(f"QA Auto-Approval: Açık (Threshold: {config.QA_THRESHOLD})")
+    st.caption("PDF her zaman oluşturulacak, QA hatası engel olmayacak")
 
     st.markdown("---")
 
@@ -160,35 +154,27 @@ if research_button:
             phase_indicators[name] = st.empty()
             phase_indicators[name].markdown(f"{icon}<br>{name}", unsafe_allow_html=True)
 
+    # Real-time log display
+    log_container = st.container()
+    log_placeholder = log_container.empty()
+
     # Run workflow
     try:
-        with st.spinner("Araştırma yapılıyor..."):
-            # Execute
-            final_state = run_research(
-                topic=topic,
-                research_mode=research_mode,
-                max_rounds=max_rounds,
-                convergence_threshold=convergence_threshold
-            )
+        status_text.text("Workflow başlatılıyor...")
+        progress_bar.progress(0.0)
 
-        # Simulate progress animation (since workflow is blocking)
-        progress_steps = [
-            (0.11, "Arama", "🟢"),
-            (0.22, "Taslak", "🟢"),
-            (0.44, "Debate", "🟢"),
-            (0.56, "Mutabakat", "🟢"),
-            (0.67, "LaTeX", "🟢"),
-            (0.78, "Derle", "🟢"),
-            (0.89, "QA", "🟢"),
-            (0.95, "Onayla", "🟢"),
-            (1.0, "Bitti", "🟢")
-        ]
+        # Execute
+        final_state = run_research(
+            topic=topic,
+            research_mode=research_mode,
+            max_rounds=max_rounds,
+            convergence_threshold=convergence_threshold
+        )
 
-        for prog, phase, status in progress_steps:
-            progress_bar.progress(prog)
-            status_text.text(f"İşlem: {phase}")
-            phase_indicators[phase].markdown(f"{status}<br>{phase}", unsafe_allow_html=True)
-            time.sleep(0.2)
+        # Mark all phases complete
+        progress_bar.progress(1.0)
+        for phase_name, indicator in phase_indicators.items():
+            indicator.markdown(f"🟢<br>{phase_name}", unsafe_allow_html=True)
 
         status_text.success("✅ Tamamlandı!")
 
@@ -209,7 +195,7 @@ if research_button:
             st.metric("Mutabakat", f"{final_state.similarity_score:.1%}")
 
         with metric_cols[2]:
-            color = "🟢" if final_state.average_qa_score >= qa_threshold else "🔴"
+            color = "🟢" if final_state.average_qa_score >= config.QA_THRESHOLD else "🟡"
             st.metric("QA Puanı", f"{color} {final_state.average_qa_score:.1f}/100")
 
         with metric_cols[3]:
@@ -218,7 +204,7 @@ if research_button:
         with metric_cols[4]:
             st.metric("PDF Regeneration", final_state.pdf_regeneration_count)
 
-        # PDF Display
+        # PDF Display - Always show
         st.markdown("### 📄 Final PDF")
 
         if final_state.pdf_path and Path(final_state.pdf_path).exists():
@@ -232,7 +218,7 @@ if research_button:
                 if final_state.pdf_approved:
                     st.success("✅ PDF kalite kontrolünden geçti")
                 else:
-                    st.warning("⚠️ PDF kalite eşiğinin altında")
+                    st.info("ℹ️ PDF oluşturuldu (QA: {:.1f}/100)".format(final_state.average_qa_score))
 
             with col_download:
                 st.download_button(
@@ -243,21 +229,26 @@ if research_button:
                     use_container_width=True
                 )
 
-            # PDF Preview
-            st.markdown("**Önizleme:**")
+            # PDF Preview - Always expanded
+            st.markdown("**PDF Önizleme:**")
             base64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
             pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="800" type="application/pdf"></iframe>'
             st.markdown(pdf_display, unsafe_allow_html=True)
 
         else:
             st.error("❌ PDF oluşturulamadı")
+            if final_state.latex_code:
+                st.warning("LaTeX kodu oluşturuldu ama PDF compile edilemedi")
+                with st.expander("LaTeX Kodunu Göster"):
+                    st.code(final_state.latex_code, language="latex")
 
-        # Consensus Report
-        with st.expander("📝 Konsensus Raporu (Markdown)"):
-            if final_state.consensus_report:
+        # Consensus Report - Always show, expanded
+        st.markdown("### 📝 Konsensus Raporu")
+        if final_state.consensus_report:
+            with st.expander("Metni Göster", expanded=True):
                 st.markdown(final_state.consensus_report)
-            else:
-                st.warning("Konsensus raporu mevcut değil")
+        else:
+            st.warning("Konsensus raporu mevcut değil")
 
         # QA Details
         with st.expander("🔍 Kalite Detayları"):

@@ -38,8 +38,9 @@ Visual QA (Gemini Vision) + Content QA (Claude Text) →
 
 ### Agents
 
-1. **Agent A - The Explorer** (Gemini Pro 1.5)
+1. **Agent A - The Explorer** (Gemini 2.5 Pro)
    - High creativity (temp=0.7)
+   - Advanced thinking capabilities
    - Broad perspective, hypothesis generation
    - Finds connections and different angles
 
@@ -187,7 +188,7 @@ TAVILY_API_KEY=tvly-xxx
 
 # Models
 CLAUDE_MODEL=claude-sonnet-4-5-20250929
-GEMINI_MODEL=gemini-1.5-pro-latest
+GEMINI_MODEL=gemini-2.5-pro
 
 # Debate Settings
 MAX_ROUNDS=3

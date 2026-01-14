@@ -28,7 +28,7 @@ try:
         prompt="Say 'Hello from Gemini!' in one sentence.",
         system_prompt="You are a helpful assistant.",
         temperature=0.5,
-        max_tokens=50
+        max_tokens=8192  # High limit for Gemini 2.5 Pro
     )
     print(f"[OK] Gemini response: {response[:100]}...")
 except Exception as e:

@@ -13,10 +13,10 @@ from .schemas import DebateState
 from .phases import (
     phase_1_grounding,
     phase_2_parallel_drafting_sync,
-    phase_3_cross_examination,
-    phase_4_convergence_check,
     phase_5_intersection_synthesis,
 )
+# Import new iterative debate system
+from .phases.phase_3_4_iterative_debate import run_debate_loop
 from .agents import (
     latex_generation_node,
     pdf_compilation_node,
@@ -27,6 +27,27 @@ from .agents import (
 from .config import config
 
 logger = logging.getLogger(__name__)
+
+
+# ═══════════════════════════════════════════════════════════
+# NODE WRAPPER (Convert DebateState return to dict)
+# ═══════════════════════════════════════════════════════════
+
+def wrap_node(func):
+    """
+    Wrapper to convert DebateState returns to dict for LangGraph compatibility
+    LangGraph expects dict updates, not full Pydantic models
+    """
+    def wrapper(state: DebateState) -> dict:
+        # Call original function
+        result_state = func(state)
+
+        # Return as dict (partial update)
+        if isinstance(result_state, DebateState):
+            return result_state.model_dump()
+        return result_state
+
+    return wrapper
 
 
 # ═══════════════════════════════════════════════════════════
@@ -65,30 +86,32 @@ def build_research_workflow() -> StateGraph:
     workflow = StateGraph(DebateState)
 
     # ───────────────────────────────────────────────────────
-    # Add all nodes
+    # Add all nodes (wrapped to return dict)
     # ───────────────────────────────────────────────────────
 
-    # Original debate nodes (Faz 1-5)
-    workflow.add_node("grounding", phase_1_grounding)
-    workflow.add_node("parallel_drafting", phase_2_parallel_drafting_sync)
-    workflow.add_node("cross_examination", phase_3_cross_examination)
-    workflow.add_node("convergence", phase_4_convergence_check)
-    workflow.add_node("intersection_synthesis", phase_5_intersection_synthesis)
+    # Original debate nodes (Faz 1-2, 5)
+    workflow.add_node("grounding", wrap_node(phase_1_grounding))
+    workflow.add_node("parallel_drafting", wrap_node(phase_2_parallel_drafting_sync))
+
+    # NEW: Iterative debate (replaces phase 3+4)
+    workflow.add_node("iterative_debate", wrap_node(run_debate_loop))
+
+    workflow.add_node("intersection_synthesis", wrap_node(phase_5_intersection_synthesis))
 
     # PDF generation nodes
-    workflow.add_node("latex_generation", latex_generation_node)
-    workflow.add_node("pdf_compilation", pdf_compilation_node)
-    workflow.add_node("quality_assurance", quality_assurance_node)
-    workflow.add_node("approval_decision", approval_decision_node)
-    workflow.add_node("pdf_revision", pdf_revision_node)
+    workflow.add_node("latex_generation", wrap_node(latex_generation_node))
+    workflow.add_node("pdf_compilation", wrap_node(pdf_compilation_node))
+    workflow.add_node("quality_assurance", wrap_node(quality_assurance_node))
+    workflow.add_node("approval_decision", wrap_node(approval_decision_node))
+    workflow.add_node("pdf_revision", wrap_node(pdf_revision_node))
 
     # ───────────────────────────────────────────────────────
     # Add sequential edges
     # ───────────────────────────────────────────────────────
 
     workflow.add_edge("grounding", "parallel_drafting")
-    workflow.add_edge("parallel_drafting", "cross_examination")
-    workflow.add_edge("cross_examination", "convergence")
+    workflow.add_edge("parallel_drafting", "iterative_debate")
+    workflow.add_edge("iterative_debate", "intersection_synthesis")
 
     # Consensus → LaTeX → PDF pipeline
     workflow.add_edge("intersection_synthesis", "latex_generation")
@@ -103,21 +126,8 @@ def build_research_workflow() -> StateGraph:
     # Add conditional edges (loops)
     # ───────────────────────────────────────────────────────
 
-    # LOOP 1: Debate loop (Faz 2-4 döngüsü)
-    def should_continue_debate(state: DebateState) -> Literal["intersection_synthesis", "cross_examination"]:
-        if state.converged:
-            return "intersection_synthesis"
-        else:
-            return "cross_examination"
-
-    workflow.add_conditional_edges(
-        source="convergence",
-        path=should_continue_debate,
-        path_map={
-            "cross_examination": "cross_examination",
-            "intersection_synthesis": "intersection_synthesis"
-        }
-    )
+    # NOTE: Debate loop is now INTERNAL to iterative_debate node
+    # No conditional edge needed - it handles convergence internally
 
     # LOOP 2: PDF regeneration loop
     def should_regenerate_pdf(state: DebateState) -> Literal["pdf_revision", "end"]:
@@ -133,9 +143,9 @@ def build_research_workflow() -> StateGraph:
                 return "end"
 
     workflow.add_conditional_edges(
-        source="approval_decision",
-        path=should_regenerate_pdf,
-        path_map={
+        "approval_decision",
+        should_regenerate_pdf,
+        {
             "pdf_revision": "pdf_revision",
             "end": END
         }
@@ -201,7 +211,11 @@ def run_research(
 
     # Execute workflow
     try:
-        final_state = workflow.invoke(initial_state)
+        # LangGraph expects dict input, not Pydantic model
+        final_state_dict = workflow.invoke(initial_state.model_dump())
+
+        # Convert back to DebateState for return
+        final_state = DebateState(**final_state_dict)
 
         # Finalize
         final_state.end_time = datetime.now()

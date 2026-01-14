@@ -5,7 +5,9 @@
       "Bash(test:*)",
       "Bash(pip install:*)",
       "Bash(python:*)",
-      "Bash(pip show:*)"
+      "Bash(pip show:*)",
+      "Bash(timeout:*)",
+      "Bash(streamlit run:*)"
     ]
   }
 }
