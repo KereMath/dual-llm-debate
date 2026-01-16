@@ -1,0 +1,110 @@
+Windows PowerShell
+Copyright (C) Microsoft Corporation. All rights reserved.
+
+Install the latest PowerShell for new features and improvements! https://aka.ms/PSWindows
+
+PS C:\Users\user> cd .\Desktop\
+PS C:\Users\user\Desktop> cd .\research-project-llm\
+PS C:\Users\user\Desktop\research-project-llm> streamlit run app.py
+>>
+
+  You can now view your Streamlit app in your browser.
+
+  Local URL: http://localhost:8501
+  Network URL: http://192.168.1.45:8501
+
+[OK] Configuration validated successfully
+2026-01-14 17:47:59 | INFO     | src.workflow | ============================================================
+2026-01-14 17:47:59 | INFO     | src.workflow | 🚀 Starting Research & Publishing Pipeline
+2026-01-14 17:47:59 | INFO     | src.workflow |    Topic: framebuffer implementation yapılacak araştırıp bana detaylıca aşırı low evel şeyleri bile içeren türkçe kapsamlı terimler için ingiilizce kullanılabilir sadece. bir rapor hazırla nası implement ederim nedir ne değildir nelere ihtiyacım var vs.
+2026-01-14 17:47:59 | INFO     | src.workflow |    Mode: auto
+2026-01-14 17:47:59 | INFO     | src.workflow |    Max Rounds: 3
+2026-01-14 17:47:59 | INFO     | src.workflow |    Threshold: 95.0%
+2026-01-14 17:47:59 | INFO     | src.workflow | ============================================================
+2026-01-14 17:47:59 | INFO     | src.phases.phase_1_grounding | 🤖 Auto Mode → Offline (no time-sensitive keywords)
+2026-01-14 17:47:59 | INFO     | src.phases.phase_1_grounding | ⚡ V1 Mode: OFFLINE - Using Internal Knowledge Only
+2026-01-14 17:47:59 | INFO     | src.phases.phase_2_parallel_drafting | Faz 2: Parallel Drafting (Isolation Mode)
+2026-01-14 17:47:59 | INFO     | google_genai.models | AFC is enabled with max remote calls: 10.
+2026-01-14 17:48:52 | INFO     | src.phases.phase_2_parallel_drafting | ✅ Parallel drafts complete
+2026-01-14 17:48:52 | INFO     | src.phases.phase_2_parallel_drafting |    Explorer (Gemini): 9954 chars
+2026-01-14 17:48:52 | INFO     | src.phases.phase_2_parallel_drafting |    Judge (Claude): 7606 chars
+2026-01-14 17:48:52 | INFO     | src.phases.phase_3_4_iterative_debate | Faz 3+4: Iterative Debate Round 1
+2026-01-14 17:48:52 | INFO     | src.phases.phase_3_4_iterative_debate |   → Gemini and Claude comparing and revising in parallel...
+2026-01-14 17:48:52 | INFO     | google_genai.models | AFC is enabled with max remote calls: 10.
+2026-01-14 17:50:06 | INFO     | src.phases.phase_3_4_iterative_debate |   → Both agents completed
+2026-01-14 17:50:06 | ERROR    | src.phases.phase_3_4_iterative_debate | JSON parse error: Expecting ',' delimiter: line 196 column 20 (char 11273)
+2026-01-14 17:50:06 | WARNING  | src.phases.phase_3_4_iterative_debate | Using fallback parsing: consensus=50.0%
+2026-01-14 17:50:06 | WARNING  | src.phases.phase_3_4_iterative_debate |   Using fallback Claude consensus: 50.0% (JSON parse failed)
+2026-01-14 17:50:06 | INFO     | src.phases.phase_3_4_iterative_debate |   Consensus: Gemini 62.0%, Claude 50.0%, Avg 56.0%
+2026-01-14 17:50:06 | INFO     | src.phases.phase_3_4_iterative_debate |   New locked claims: 0
+2026-01-14 17:50:06 | INFO     | src.phases.phase_3_4_iterative_debate |   Still disputed: 1
+2026-01-14 17:50:06 | INFO     | src.phases.phase_3_4_iterative_debate | 🔄 Debate continues (Gap: 39.0%)
+2026-01-14 17:50:06 | INFO     | src.phases.phase_3_4_iterative_debate | Faz 3+4: Iterative Debate Round 2
+2026-01-14 17:50:06 | INFO     | src.phases.phase_3_4_iterative_debate |   → Gemini and Claude comparing and revising in parallel...
+2026-01-14 17:50:06 | INFO     | google_genai.models | AFC is enabled with max remote calls: 10.
+2026-01-14 17:51:19 | INFO     | src.phases.phase_3_4_iterative_debate |   → Both agents completed
+2026-01-14 17:51:19 | ERROR    | src.phases.phase_3_4_iterative_debate | JSON parse error: Unterminated string starting at: line 220 column 21 (char 15707)
+2026-01-14 17:51:19 | WARNING  | src.phases.phase_3_4_iterative_debate | Using fallback parsing: consensus=47.0%
+2026-01-14 17:51:19 | ERROR    | src.phases.phase_3_4_iterative_debate | JSON parse error: Unterminated string starting at: line 178 column 21 (char 11212)
+2026-01-14 17:51:19 | WARNING  | src.phases.phase_3_4_iterative_debate | Using fallback parsing: consensus=50.0%
+2026-01-14 17:51:19 | WARNING  | src.phases.phase_3_4_iterative_debate |   Using fallback Gemini consensus: 47.0% (JSON parse failed)
+2026-01-14 17:51:19 | WARNING  | src.phases.phase_3_4_iterative_debate |   Using fallback Claude consensus: 50.0% (JSON parse failed)
+2026-01-14 17:51:19 | INFO     | src.phases.phase_3_4_iterative_debate |   Consensus: Gemini 47.0%, Claude 50.0%, Avg 48.5%
+2026-01-14 17:51:19 | INFO     | src.phases.phase_3_4_iterative_debate |   New locked claims: 0
+2026-01-14 17:51:19 | INFO     | src.phases.phase_3_4_iterative_debate |   Still disputed: 1
+2026-01-14 17:51:19 | INFO     | src.phases.phase_3_4_iterative_debate | 🔄 Debate continues (Gap: 46.5%)
+2026-01-14 17:51:19 | INFO     | src.phases.phase_3_4_iterative_debate | Faz 3+4: Iterative Debate Round 3
+2026-01-14 17:51:19 | INFO     | src.phases.phase_3_4_iterative_debate |   → Gemini and Claude comparing and revising in parallel...
+2026-01-14 17:51:19 | INFO     | google_genai.models | AFC is enabled with max remote calls: 10.
+2026-01-14 17:52:33 | INFO     | src.phases.phase_3_4_iterative_debate |   → Both agents completed
+2026-01-14 17:52:33 | ERROR    | src.phases.phase_3_4_iterative_debate | JSON parse error: Unterminated string starting at: line 149 column 21 (char 11564)
+2026-01-14 17:52:33 | WARNING  | src.phases.phase_3_4_iterative_debate | Using fallback parsing: consensus=36.0%
+2026-01-14 17:52:33 | ERROR    | src.phases.phase_3_4_iterative_debate | JSON parse error: Unterminated string starting at: line 176 column 23 (char 11329)
+2026-01-14 17:52:33 | WARNING  | src.phases.phase_3_4_iterative_debate | Using fallback parsing: consensus=50.0%
+2026-01-14 17:52:33 | WARNING  | src.phases.phase_3_4_iterative_debate |   Using fallback Gemini consensus: 36.0% (JSON parse failed)
+2026-01-14 17:52:33 | WARNING  | src.phases.phase_3_4_iterative_debate |   Using fallback Claude consensus: 50.0% (JSON parse failed)
+2026-01-14 17:52:33 | INFO     | src.phases.phase_3_4_iterative_debate |   Consensus: Gemini 36.0%, Claude 50.0%, Avg 43.0%
+2026-01-14 17:52:33 | INFO     | src.phases.phase_3_4_iterative_debate |   New locked claims: 0
+2026-01-14 17:52:33 | INFO     | src.phases.phase_3_4_iterative_debate |   Still disputed: 1
+2026-01-14 17:52:33 | INFO     | src.phases.phase_3_4_iterative_debate | 🔄 Debate continues (Gap: 52.0%)
+2026-01-14 17:52:33 | WARNING  | src.phases.phase_3_4_iterative_debate | ⚠️ FORCED STOP - Max rounds (3) reached
+2026-01-14 17:52:33 | WARNING  | src.phases.phase_3_4_iterative_debate |    Final consensus: 43.0% (threshold: 95.0%)
+2026-01-14 17:52:33 | INFO     | src.phases.phase_3_4_iterative_debate | ═══════════════════════════════════════════════════
+2026-01-14 17:52:33 | INFO     | src.phases.phase_3_4_iterative_debate | CONVERGENCE PROGRESSION
+2026-01-14 17:52:33 | INFO     | src.phases.phase_3_4_iterative_debate | ═══════════════════════════════════════════════════
+2026-01-14 17:52:33 | INFO     | src.phases.phase_3_4_iterative_debate | Round 1: ███████████░░░░░░░░░ 56%
+2026-01-14 17:52:33 | INFO     | src.phases.phase_3_4_iterative_debate |   Agreed: 6 new claims
+2026-01-14 17:52:33 | INFO     | src.phases.phase_3_4_iterative_debate |   Disputed: 1 remaining
+2026-01-14 17:52:33 | INFO     | src.phases.phase_3_4_iterative_debate | Round 2: █████████░░░░░░░░░░░ 48%
+2026-01-14 17:52:33 | INFO     | src.phases.phase_3_4_iterative_debate |   Agreed: 0 new claims
+2026-01-14 17:52:33 | INFO     | src.phases.phase_3_4_iterative_debate |   Disputed: 1 remaining
+2026-01-14 17:52:33 | INFO     | src.phases.phase_3_4_iterative_debate | Round 3: ████████░░░░░░░░░░░░ 43%
+2026-01-14 17:52:33 | INFO     | src.phases.phase_3_4_iterative_debate |   Agreed: 0 new claims
+2026-01-14 17:52:33 | INFO     | src.phases.phase_3_4_iterative_debate |   Disputed: 1 remaining
+2026-01-14 17:52:33 | INFO     | src.phases.phase_3_4_iterative_debate |
+Total Locked Claims: 0
+2026-01-14 17:52:33 | INFO     | src.phases.phase_3_4_iterative_debate | ═══════════════════════════════════════════════════
+2026-01-14 17:52:33 | INFO     | src.phases.phase_5_intersection | Faz 5: Intersection Synthesis (Hakem Kararı)
+2026-01-14 17:53:50 | INFO     | src.phases.phase_5_intersection | ✅ Intersection synthesis complete
+2026-01-14 17:53:50 | INFO     | src.phases.phase_5_intersection |    Report length: 10790 chars
+2026-01-14 17:53:50 | INFO     | src.agents.latex_generator | LaTeX Generation: Converting consensus to LaTeX
+2026-01-14 17:55:51 | INFO     | src.agents.latex_generator | ✅ LaTeX generation complete (20073 chars)
+2026-01-14 17:55:51 | INFO     | src.agents.pdf_compiler | PDF Compilation: Compiling LaTeX to PDF
+2026-01-14 17:55:52 | INFO     | src.agents.pdf_compiler | ✅ PDF compiled successfully: output\pdfs\research_20260114_175552.pdf
+2026-01-14 17:55:52 | INFO     | src.agents.qa_agents | Quality Assurance: Running Dual QA
+C:\Users\user\AppData\Local\Programs\Python\Python310\lib\site-packages\pypdf\_crypt_providers\_cryptography.py:32: CryptographyDeprecationWarning: ARC4 has been moved to cryptography.hazmat.decrepit.ciphers.algorithms.ARC4 and will be removed from cryptography.hazmat.primitives.ciphers.algorithms in 48.0.0.
+  from cryptography.hazmat.primitives.ciphers.algorithms import AES, ARC4
+2026-01-14 17:55:54 | INFO     | google_genai.models | AFC is enabled with max remote calls: 10.
+2026-01-14 17:56:36 | INFO     | src.agents.qa_agents | ✅ QA Complete:
+2026-01-14 17:56:36 | INFO     | src.agents.qa_agents |    Visual: 100.0/100
+2026-01-14 17:56:36 | INFO     | src.agents.qa_agents |    Content: 92.0/100
+2026-01-14 17:56:36 | INFO     | src.agents.qa_agents |    Average: 96.0/100
+2026-01-14 17:56:36 | INFO     | src.agents.qa_agents | ✅ PDF APPROVED (Score: 96.0 >= 75)
+2026-01-14 17:56:36 | INFO     | src.workflow | ============================================================
+2026-01-14 17:56:36 | INFO     | src.workflow | ✅ Pipeline Complete in 517.0s
+2026-01-14 17:56:36 | INFO     | src.workflow |    PDF: output\pdfs\research_20260114_175552.pdf
+2026-01-14 17:56:36 | INFO     | src.workflow |    QA Score: 96.0/100
+2026-01-14 17:56:36 | INFO     | src.workflow |    Debate Rounds: 3
+2026-01-14 17:56:36 | INFO     | src.workflow |    Consensus: 43.0%
+2026-01-14 17:56:36 | INFO     | src.workflow |    Approved: ✅
+2026-01-14 17:56:36 | INFO     | src.workflow | ============================================================

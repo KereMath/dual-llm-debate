@@ -13,8 +13,6 @@ from src.schemas import DebateState, DebateRound, ComparisonClaim, LockedClaim
 from src.api_clients import call_claude_api, call_gemini_api
 from src.prompts import (
     PROMPT_COMPARISON_HANDSHAKE,
-    DEVIL_ADVOCATE_STRICT,
-    DEVIL_ADVOCATE_OPEN,
     SYSTEM_PROMPT_GEMINI_EXPLORER,
     SYSTEM_PROMPT_CLAUDE_JUDGE
 )
@@ -26,29 +24,54 @@ logger = logging.getLogger(__name__)
 # HELPER FUNCTIONS
 # ═══════════════════════════════════════════════════════════
 
-def assign_devil_advocate_roles(round_num: int) -> dict:
+def get_progressive_confidence_threshold(round_num: int) -> float:
     """
-    Alternate devil's advocate role each round
+    Progressive confidence threshold system (SOTA)
 
-    Round 1: Both neutral
-    Round 2: Gemini strict, Claude open
-    Round 3: Claude strict, Gemini open
+    Round 1: 0.70 - Accept moderate confidence agreements
+    Round 2: 0.80 - Raise the bar for locking
+    Round 3+: 0.85 - Only lock very confident agreements
+
+    This ensures monotonic convergence without aggressive challenging
     """
     if round_num == 1:
-        return {
-            "gemini": "",
-            "claude": ""
-        }
-    elif round_num % 2 == 0:
-        return {
-            "gemini": DEVIL_ADVOCATE_STRICT,
-            "claude": DEVIL_ADVOCATE_OPEN
-        }
+        return 0.70
+    elif round_num == 2:
+        return 0.80
     else:
-        return {
-            "gemini": DEVIL_ADVOCATE_OPEN,
-            "claude": DEVIL_ADVOCATE_STRICT
-        }
+        return 0.85
+
+
+def get_collaborative_instruction(round_num: int, locked_count: int) -> str:
+    """
+    Get collaborative instruction for agents
+
+    Round 1: Neutral comparison
+    Round 2+: Collaborative convergence (respect locked claims)
+    """
+    if round_num == 1:
+        return ""  # Neutral first round
+    else:
+        return f"""
+═══════════════════════════════════════════════════════════
+🤝 COLLABORATIVE CONVERGENCE MODE
+═══════════════════════════════════════════════════════════
+
+This round, focus on constructive agreement:
+- ✅ RESPECT all {locked_count} locked claims from previous rounds
+- 🎯 FOCUS on disputed/partial claims only
+- 🔍 Be HONEST: mark "conflict" only if evidence genuinely contradicts
+- 🤝 Be CONSTRUCTIVE: find common ground where evidence allows
+- 📊 Be RIGOROUS: require adequate evidence for "agree" status
+- 🎓 Goal: Converge on truth through evidence, not forced consensus
+
+Quality standards for locking (Round {round_num} threshold: {get_progressive_confidence_threshold(round_num):.0%}):
+- Both agents must mark "agree"
+- Both confidence ≥ {get_progressive_confidence_threshold(round_num):.0%}
+- Evidence must support the claim
+
+═══════════════════════════════════════════════════════════
+"""
 
 
 def format_locked_agreements(locked: List[LockedClaim]) -> str:
@@ -108,11 +131,18 @@ def parse_comparison_response(response_text: str) -> dict:
     """
     Parse LLM response into structured comparison data
 
-    Expected JSON format from LLM
+    Expected format:
+    ```json
+    {...}
+    ```
+    === REVISED ANSWER ===
+    [text]
+    === END ===
     """
     try:
-        # Try to extract JSON from response
-        # LLMs sometimes wrap JSON in markdown code blocks
+        import re
+
+        # Extract JSON block
         if "```json" in response_text:
             json_start = response_text.find("```json") + 7
             json_end = response_text.find("```", json_start)
@@ -122,17 +152,129 @@ def parse_comparison_response(response_text: str) -> dict:
             json_end = response_text.find("```", json_start)
             json_text = response_text[json_start:json_end].strip()
         else:
-            json_text = response_text
+            # Fallback: try to find JSON object (with nested braces support)
+            # Match from first { to last } that contains "comparison_table"
+            if '"comparison_table"' in response_text:
+                start_idx = response_text.find('{')
+                end_idx = response_text.rfind('}')
+                if start_idx != -1 and end_idx != -1:
+                    json_text = response_text[start_idx:end_idx+1]
+                else:
+                    json_text = response_text
+            else:
+                json_text = response_text
+
+        # Clean common JSON errors before parsing
+        json_text = json_text.replace(',]', ']')  # Remove trailing commas in arrays
+        json_text = json_text.replace(',}', '}')  # Remove trailing commas in objects
 
         data = json.loads(json_text)
 
+        # Extract revised answer from text section (after JSON)
+        if "=== REVISED ANSWER ===" in response_text:
+            answer_start = response_text.find("=== REVISED ANSWER ===") + 22
+            answer_end = response_text.find("=== END ===", answer_start)
+            if answer_end == -1:
+                revised_answer = response_text[answer_start:].strip()
+            else:
+                revised_answer = response_text[answer_start:answer_end].strip()
+        else:
+            # Fallback: use part after JSON
+            revised_answer = response_text[json_end+3:].strip() if "```" in response_text else response_text
+
+        # Add revised_answer to data
+        data["revised_answer"] = revised_answer
+
         # Validate required fields
-        required = ["comparison_table", "consensus_score", "revised_answer", "convergence_status"]
+        required = ["consensus_score", "revised_answer", "convergence_status"]
         for field in required:
             if field not in data:
                 raise ValueError(f"Missing required field: {field}")
 
+        # Set defaults for optional fields
+        if "comparison_table" not in data:
+            data["comparison_table"] = []
+        if "new_agreements" not in data:
+            data["new_agreements"] = []
+        if "still_disputed" not in data:
+            data["still_disputed"] = []
+        if "total_claims" not in data:
+            data["total_claims"] = 0
+        if "agreed_claims" not in data:
+            data["agreed_claims"] = 0
+
         return data
+
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON parse error: {e}")
+        logger.debug(f"Failed JSON text: {response_text[:1000]}...")
+
+        # Log the problematic JSON to help debug
+        logger.debug(f"Full response (first 2000 chars): {response_text[:2000]}")
+
+        # Try to extract at least the revised_answer and consensus_score
+        # using regex as fallback
+        revised_answer = response_text
+        consensus_score = 0.5
+
+        # Try to extract consensus_score from text - multiple patterns
+        import re
+
+        # Pattern 1: "consensus_score": 0.75 or "consensus_score": 75
+        consensus_match = re.search(r'"consensus_score":\s*(\d+\.?\d*)', response_text)
+        if not consensus_match:
+            # Pattern 2: consensus: 75% or consensus score: 0.75
+            consensus_match = re.search(r'consensus[:\s]+(\d+\.?\d*)%?', response_text, re.IGNORECASE)
+        if not consensus_match:
+            # Pattern 3: Average consensus or Avg consensus
+            consensus_match = re.search(r'(?:avg|average)\s+consensus[:\s]+(\d+\.?\d*)%?', response_text, re.IGNORECASE)
+
+        if consensus_match:
+            try:
+                raw_score = float(consensus_match.group(1))
+                # If score > 1, it's percentage format (e.g., 47 means 47%)
+                if raw_score > 1.0:
+                    consensus_score = raw_score / 100.0
+                else:
+                    consensus_score = raw_score
+                # Clamp to valid range
+                consensus_score = max(0.0, min(1.0, consensus_score))
+            except:
+                pass
+
+        # Try to extract revised_answer from text section
+        if "=== REVISED ANSWER ===" in response_text:
+            answer_start = response_text.find("=== REVISED ANSWER ===") + 22
+            answer_end = response_text.find("=== END ===", answer_start)
+            if answer_end == -1:
+                revised_answer = response_text[answer_start:].strip()
+            else:
+                revised_answer = response_text[answer_start:answer_end].strip()
+        else:
+            # Try to extract revised_answer from JSON if present
+            answer_match = re.search(r'"revised_answer":\s*"(.*?)"(?=\s*[,}])', response_text, re.DOTALL)
+            if answer_match:
+                revised_answer = answer_match.group(1)
+            else:
+                revised_answer = response_text
+
+        if consensus_score == 0.5:
+            logger.warning(f"Using fallback parsing: consensus={consensus_score:.1%} (default, no score found)")
+        else:
+            logger.warning(f"Using fallback parsing: consensus={consensus_score:.1%} (extracted from text)")
+
+        return {
+            "comparison_table": [],
+            "consensus_score": consensus_score,
+            "total_claims": 0,
+            "agreed_claims": 0,
+            "disputed_claims": 0,
+            "new_agreements": [],
+            "still_disputed": ["JSON parse error - partial data"],
+            "revised_answer": revised_answer,
+            "convergence_status": "continue",
+            "next_focus": "Fix JSON formatting"
+        }
 
     except Exception as e:
         logger.error(f"Failed to parse comparison response: {e}")
@@ -155,11 +297,13 @@ def parse_comparison_response(response_text: str) -> dict:
 
 def calculate_weighted_consensus(comparison_table: List[dict]) -> float:
     """
-    Calculate confidence-weighted consensus score
+    Calculate confidence-weighted consensus score (individual perspective)
 
     Not all agreements are equal:
     - High confidence agreement (0.9, 0.9) = strong
     - Low confidence agreement (0.4, 0.5) = weak
+
+    This is an asymmetric metric - each agent uses their own claim base
     """
     if not comparison_table:
         return 0.0
@@ -189,6 +333,58 @@ def calculate_weighted_consensus(comparison_table: List[dict]) -> float:
     return agreed_weight / total_weight
 
 
+def calculate_symmetric_consensus(
+    gemini_table: List[dict],
+    claude_table: List[dict]
+) -> float:
+    """
+    Calculate symmetric consensus - both agents see same score
+
+    Only counts claims that BOTH agents evaluated (intersection)
+    This ensures mathematical consistency and prevents confusion
+
+    Returns:
+        Consensus score (0.0-1.0) based on intersection of claims
+    """
+    if not gemini_table or not claude_table:
+        return 0.0
+
+    total_weight = 0.0
+    agreed_weight = 0.0
+
+    # Match claims by ID (intersection approach)
+    for g_claim in gemini_table:
+        claim_id = g_claim.get("claim_id")
+        c_claim = next((c for c in claude_table if c.get("claim_id") == claim_id), None)
+
+        if not c_claim:
+            continue  # Skip if not in both tables
+
+        # Both agents evaluated this claim
+        g_conf = g_claim.get("your_confidence", 0.5)
+        c_conf = c_claim.get("other_confidence", 0.5)
+        avg_conf = (g_conf + c_conf) / 2
+
+        total_weight += 1.0
+
+        # Check status from BOTH perspectives
+        g_status = g_claim.get("status")
+        c_status = c_claim.get("status")
+
+        if g_status == "agree" and c_status == "agree":
+            # Full agreement
+            agreed_weight += avg_conf
+        elif g_status == "partial" or c_status == "partial":
+            # At least one sees partial agreement
+            agreed_weight += (avg_conf * 0.5)
+        # conflict = 0
+
+    if total_weight == 0:
+        return 0.0
+
+    return agreed_weight / total_weight
+
+
 def identify_lockable_claims(
     gemini_table: List[dict],
     claude_table: List[dict],
@@ -197,12 +393,22 @@ def identify_lockable_claims(
     """
     Identify claims that can be locked (both agents agree with high confidence)
 
+    SOTA: Progressive confidence threshold system
+    - Round 1: threshold = 0.70 (more claims locked early)
+    - Round 2: threshold = 0.80 (higher bar)
+    - Round 3+: threshold = 0.85 (only very confident claims)
+
     Locking criteria:
     - Both agents marked as "agree"
-    - Both confidence >= 0.85
+    - Both confidence >= progressive_threshold
     - Statement is semantically same
     """
     lockable = []
+
+    # Get progressive threshold for this round
+    threshold = get_progressive_confidence_threshold(round_num)
+
+    logger.debug(f"  Locking threshold for Round {round_num}: {threshold:.0%}")
 
     # Match claims by ID (assumes both tables have same structure)
     for g_claim in gemini_table:
@@ -214,11 +420,14 @@ def identify_lockable_claims(
         if not c_claim:
             continue
 
-        # Check locking criteria
+        # Check locking criteria with progressive threshold
+        gemini_conf = g_claim.get("your_confidence", 0)
+        claude_conf = c_claim.get("other_confidence", 0)
+
         if (g_claim.get("status") == "agree" and
             c_claim.get("status") == "agree" and
-            g_claim.get("your_confidence", 0) >= 0.85 and
-            c_claim.get("other_confidence", 0) >= 0.85):
+            gemini_conf >= threshold and
+            claude_conf >= threshold):
 
             # Lock this claim
             locked = LockedClaim(
@@ -226,9 +435,10 @@ def identify_lockable_claims(
                 source_gemini=g_claim.get("your_source"),
                 source_claude=c_claim.get("your_source"),
                 locked_round=round_num,
-                confidence_avg=(g_claim.get("your_confidence", 0) + c_claim.get("other_confidence", 0)) / 2
+                confidence_avg=(gemini_conf + claude_conf) / 2
             )
             lockable.append(locked)
+            logger.debug(f"    ✓ Locked: {locked.statement[:80]}... (conf: {locked.confidence_avg:.2f})")
 
     return lockable
 
@@ -264,10 +474,14 @@ def run_iterative_debate_round(
         gemini_prev = state.get_latest_gemini_answer()
         claude_prev = state.get_latest_claude_answer()
 
-    # Assign devil's advocate roles
-    devil_roles = assign_devil_advocate_roles(round_num)
+    # Get collaborative instruction (SOTA: no devil's advocate, just collaborative mode)
+    locked_count = len(state.locked_agreements)
+    collaborative_instruction = get_collaborative_instruction(round_num, locked_count)
 
-    # Build prompts for both agents
+    logger.info(f"  Progressive threshold: {get_progressive_confidence_threshold(round_num):.0%}")
+    logger.info(f"  Mode: {'Neutral comparison' if round_num == 1 else 'Collaborative convergence'}")
+
+    # Build prompts for both agents (same instruction for both - no alternating roles)
     gemini_prompt = build_handshake_prompt(
         agent_name="Gemini (Explorer)",
         topic=state.topic,
@@ -277,7 +491,7 @@ def run_iterative_debate_round(
         locked_agreements=state.locked_agreements,
         disputed_points=state.current_disputed_points,
         round_num=round_num,
-        devil_advocate_instruction=devil_roles["gemini"]
+        devil_advocate_instruction=collaborative_instruction
     )
 
     claude_prompt = build_handshake_prompt(
@@ -289,32 +503,105 @@ def run_iterative_debate_round(
         locked_agreements=state.locked_agreements,
         disputed_points=state.current_disputed_points,
         round_num=round_num,
-        devil_advocate_instruction=devil_roles["claude"]
+        devil_advocate_instruction=collaborative_instruction
     )
 
-    # Call both agents in parallel (async would be better but keeping it simple)
-    logger.info("  → Gemini comparing and revising...")
-    gemini_response = call_gemini_api(
-        prompt=gemini_prompt,
-        system_prompt=SYSTEM_PROMPT_GEMINI_EXPLORER
-    )
+    # Call both agents in parallel using threading
+    logger.info("  → Gemini and Claude comparing and revising in parallel...")
 
-    logger.info("  → Claude comparing and revising...")
-    claude_response = call_claude_api(
-        prompt=claude_prompt,
-        system_prompt=SYSTEM_PROMPT_CLAUDE_JUDGE
-    )
+    import concurrent.futures
+
+    def call_gemini():
+        return call_gemini_api(
+            prompt=gemini_prompt,
+            system_prompt=SYSTEM_PROMPT_GEMINI_EXPLORER
+        )
+
+    def call_claude():
+        return call_claude_api(
+            prompt=claude_prompt,
+            system_prompt=SYSTEM_PROMPT_CLAUDE_JUDGE
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        future_gemini = executor.submit(call_gemini)
+        future_claude = executor.submit(call_claude)
+
+        gemini_response = future_gemini.result()
+        claude_response = future_claude.result()
+
+    logger.info("  → Both agents completed")
 
     # Parse responses
+    logger.debug(f"Gemini response preview: {gemini_response[:500]}...")
     gemini_data = parse_comparison_response(gemini_response)
+
+    logger.debug(f"Claude response preview: {claude_response[:500]}...")
     claude_data = parse_comparison_response(claude_response)
 
-    # Calculate weighted consensus (average of both agents' scores)
-    gemini_consensus = calculate_weighted_consensus(gemini_data.get("comparison_table", []))
-    claude_consensus = calculate_weighted_consensus(claude_data.get("comparison_table", []))
-    avg_consensus = (gemini_consensus + claude_consensus) / 2
+    # ═══════════════════════════════════════════════════════════
+    # HYBRID CONSENSUS CALCULATION (4 METRICS)
+    # ═══════════════════════════════════════════════════════════
+    # We calculate BOTH symmetric and asymmetric metrics:
+    # 1. Symmetric Consensus (intersection-based, official metric for convergence)
+    # 2. Gemini Coverage (asymmetric, diagnostic)
+    # 3. Claude Coverage (asymmetric, diagnostic)
+    # 4. Average Coverage (asymmetric average)
+    #
+    # ALL 4 METRICS must reach threshold for convergence
+    # ═══════════════════════════════════════════════════════════
 
-    logger.info(f"  Consensus: Gemini {gemini_consensus:.1%}, Claude {claude_consensus:.1%}, Avg {avg_consensus:.1%}")
+    # Calculate asymmetric coverage (individual perspectives)
+    if gemini_data.get("comparison_table"):
+        gemini_coverage = calculate_weighted_consensus(gemini_data["comparison_table"])
+        logger.debug(f"  Gemini: Calculated coverage from {len(gemini_data['comparison_table'])} claims")
+    else:
+        # Use regex-extracted consensus_score from fallback parsing
+        gemini_coverage = gemini_data.get("consensus_score", 0.5)
+        if gemini_coverage == 0.0:
+            logger.error(f"  ⚠️ Gemini coverage is 0.0% - likely parse failure!")
+        logger.warning(f"  Using fallback Gemini coverage: {gemini_coverage:.1%} (JSON parse failed)")
+
+    if claude_data.get("comparison_table"):
+        claude_coverage = calculate_weighted_consensus(claude_data["comparison_table"])
+        logger.debug(f"  Claude: Calculated coverage from {len(claude_data['comparison_table'])} claims")
+    else:
+        # Use regex-extracted consensus_score from fallback parsing
+        claude_coverage = claude_data.get("consensus_score", 0.5)
+        if claude_coverage == 0.0:
+            logger.error(f"  ⚠️ Claude coverage is 0.0% - likely parse failure!")
+        logger.warning(f"  Using fallback Claude coverage: {claude_coverage:.1%} (JSON parse failed)")
+
+    # Calculate symmetric consensus (intersection-based, official metric)
+    if gemini_data.get("comparison_table") and claude_data.get("comparison_table"):
+        gemini_table = gemini_data["comparison_table"]
+        claude_table = claude_data["comparison_table"]
+
+        # Debug: Check intersection size
+        gemini_ids = set(c.get("claim_id") for c in gemini_table)
+        claude_ids = set(c.get("claim_id") for c in claude_table)
+        intersection_ids = gemini_ids & claude_ids
+
+        logger.debug(f"  Claim matching: Gemini {len(gemini_ids)} claims, Claude {len(claude_ids)} claims, Intersection {len(intersection_ids)} claims")
+
+        symmetric_consensus = calculate_symmetric_consensus(gemini_table, claude_table)
+        logger.debug(f"  Symmetric consensus calculated from intersection")
+    else:
+        # Fallback: average of individual scores if JSON parse failed
+        symmetric_consensus = (gemini_coverage + claude_coverage) / 2
+        logger.warning(f"  Using fallback symmetric consensus (average): {symmetric_consensus:.1%}")
+
+    # Calculate average coverage (for comparison)
+    avg_coverage = (gemini_coverage + claude_coverage) / 2
+
+    # ═══════════════════════════════════════════════════════════
+    # LOG ALL 4 METRICS
+    # ═══════════════════════════════════════════════════════════
+    logger.info(f"  📊 METRICS (4-way consensus):")
+    logger.info(f"     • Symmetric: {symmetric_consensus:.1%} (intersection-based)")
+    logger.info(f"     • Gemini Coverage: {gemini_coverage:.1%} (asymmetric)")
+    logger.info(f"     • Claude Coverage: {claude_coverage:.1%} (asymmetric)")
+    logger.info(f"     • Average Coverage: {avg_coverage:.1%} (asymmetric avg)")
 
     # Identify lockable claims (high confidence agreements)
     new_locked = identify_lockable_claims(
@@ -337,22 +624,47 @@ def run_iterative_debate_round(
 
     logger.info(f"  Still disputed: {len(disputed)}")
 
-    # Determine convergence status
+    # ═══════════════════════════════════════════════════════════
+    # 4-WAY CONVERGENCE CHECK
+    # ═══════════════════════════════════════════════════════════
+    # ALL 4 metrics must reach threshold for true convergence:
+    # 1. Symmetric consensus >= threshold
+    # 2. Gemini coverage >= threshold
+    # 3. Claude coverage >= threshold
+    # 4. Average coverage >= threshold
+    # ═══════════════════════════════════════════════════════════
     convergence_threshold = state.convergence_threshold
-    converged = (
-        avg_consensus >= convergence_threshold and
-        gemini_data.get("convergence_status") == "converged" and
-        claude_data.get("convergence_status") == "converged"
-    )
+
+    # Check each metric individually
+    symmetric_ok = symmetric_consensus >= convergence_threshold
+    gemini_ok = gemini_coverage >= convergence_threshold
+    claude_ok = claude_coverage >= convergence_threshold
+    avg_ok = avg_coverage >= convergence_threshold
+
+    # ALL 4 must pass
+    converged = symmetric_ok and gemini_ok and claude_ok and avg_ok
+
+    # Log which metrics passed/failed
+    logger.info(f"  🎯 Convergence Check (threshold: {convergence_threshold:.0%}):")
+    logger.info(f"     {'✅' if symmetric_ok else '❌'} Symmetric: {symmetric_consensus:.1%}")
+    logger.info(f"     {'✅' if gemini_ok else '❌'} Gemini Coverage: {gemini_coverage:.1%}")
+    logger.info(f"     {'✅' if claude_ok else '❌'} Claude Coverage: {claude_coverage:.1%}")
+    logger.info(f"     {'✅' if avg_ok else '❌'} Average Coverage: {avg_coverage:.1%}")
+
+    # Collect new agreements (combine LLM-reported + locked claims)
+    llm_agreements = gemini_data.get("new_agreements", []) + claude_data.get("new_agreements", [])
+    locked_agreements = [claim.statement for claim in new_locked]  # Extract statements from locked claims
+    all_new_agreements = llm_agreements + locked_agreements
 
     # Create DebateRound record
+    # Store symmetric consensus as primary metric
     debate_round = DebateRound(
         round_num=round_num,
         gemini_answer=gemini_data.get("revised_answer", ""),
         claude_answer=claude_data.get("revised_answer", ""),
         comparison_table=[],  # Could store full table but it's large
-        consensus_score=avg_consensus,
-        new_agreements=gemini_data.get("new_agreements", []) + claude_data.get("new_agreements", []),
+        consensus_score=symmetric_consensus,  # Use symmetric as official metric
+        new_agreements=all_new_agreements,
         disputed_points=disputed,
         convergence_status="converged" if converged else "continue",
         next_focus=gemini_data.get("next_focus", "") or claude_data.get("next_focus", "")
@@ -361,11 +673,14 @@ def run_iterative_debate_round(
     # Add to state
     state.add_debate_round(debate_round)
 
-    # Log result
+    # Log result with 4-metric summary
     if converged:
-        logger.info(f"✅ CONVERGED at {avg_consensus:.1%}")
+        logger.info(f"✅ CONVERGED - All 4 metrics >= {convergence_threshold:.0%}")
     else:
-        logger.info(f"🔄 Debate continues (Gap: {(convergence_threshold - avg_consensus):.1%})")
+        # Find lowest metric for gap reporting
+        min_metric = min(symmetric_consensus, gemini_coverage, claude_coverage, avg_coverage)
+        gap = convergence_threshold - min_metric
+        logger.info(f"🔄 Debate continues (Lowest metric: {min_metric:.1%}, Gap: {gap:.1%})")
 
     return state
 

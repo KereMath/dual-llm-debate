@@ -536,35 +536,48 @@ CRITICAL RULES:
 {devil_advocate_instruction}
 
 ═══════════════════════════════════════════════════════════
-OUTPUT FORMAT (JSON):
+OUTPUT FORMAT - TWO PARTS (JSON + TEXT):
 ═══════════════════════════════════════════════════════════
 
+⚠️ CRITICAL JSON RULES TO PREVENT PARSE ERRORS:
+🚨 JSON MUST BE 100% VALID - System will FAIL if malformed!
+- Keep all JSON strings SHORT (max 50 chars per field)
+- NO Turkish characters in JSON (English/ASCII only)
+- NO newlines inside JSON strings
+- Escape ALL quotes inside strings: " → \\"
+- NO trailing commas after last item in arrays/objects
+- Use ONLY numbers for scores (0.75 not "0.75")
+- For long text, use the TEXT section AFTER JSON
+- VALIDATE: Copy your JSON to jsonlint.com mentally before output
+- DOUBLE-CHECK: Last item in array/object has NO comma
+
+PART 1: JSON METADATA (wrap in ```json code block)
+
+```json
 {{
   "comparison_table": [
     {{
       "claim_id": 1,
-      "your_statement": "...",
-      "other_statement": "...",
-      "your_source": "...",
-      "other_source": "...",
-      "status": "agree|conflict|partial",
-      "resolution": "...",
+      "status": "agree",
       "your_confidence": 0.9,
       "other_confidence": 0.85,
-      "resolution_reasoning": "..."
-    }},
-    ...
+      "your_source": "URL1",
+      "other_source": "URL2"
+    }}
   ],
   "consensus_score": 0.75,
   "total_claims": 20,
   "agreed_claims": 15,
-  "disputed_claims": 5,
-  "new_agreements": ["Claim about X", "Claim about Y"],
-  "still_disputed": ["Migration timing discrepancy", "Predator list incomplete"],
-  "revised_answer": "... YOUR COMPLETE NEW ANSWER HERE ...",
-  "convergence_status": "continue|converged",
-  "next_focus": "Resolve migration timing with additional sources"
+  "convergence_status": "continue"
 }}
+```
+
+PART 2: REVISED ANSWER (plain text, any length)
+
+=== REVISED ANSWER ===
+[Your complete revised answer here - Turkish OK, any length, any characters]
+
+=== END ===
 """
 
 
