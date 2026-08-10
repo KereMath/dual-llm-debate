@@ -1,405 +1,70 @@
-# 🎓 Research & Publishing Machine
+# dual-llm-debate
 
-**Dual-LLM Debate System for Academic PDF Generation**
+Two LLMs research the same question independently, cross-examine each other's claims round by round, and only what both accept ends up in a LaTeX-compiled PDF report.
 
-*Truth = A ∩ B | Doğruluk = İki bağımsız zekanın anlaşmazlık sonrası vardığı ortak paydadır*
+## What it is
 
----
+A Python pipeline that answers a research question with two LLM agents instead of one. Gemini (default model: `gemini-1.5-pro-latest`) plays the "Explorer" (broad, higher temperature) and Claude (default model: `claude-sonnet-4-5-20250929`) plays the "Judge" (strict, lower temperature). Both draft answers independently from the same evidence, then debate each other claim by claim over multiple rounds. A referee stage extracts only the claims both agents accept — the project's working principle, stated in the code, is `Truth = A ∩ B` — and the result is rendered to an academic-style PDF through LaTeX, with an automated quality-assurance loop before approval.
 
-## 📋 Overview
+The pipeline is orchestrated as a LangGraph state machine and driven from a Streamlit web UI (Turkish-language interface).
 
-A state-of-the-art research system that uses **two frontier LLMs** (Claude Sonnet 4.5 & Gemini Pro 1.5) in an adversarial debate to generate **publication-ready academic PDFs** with verified, hallucination-free content.
+## Why it exists
 
-### Key Features
+A single model's answer inherits that model's hallucinations and blind spots. This project is an experiment in reducing that risk through cross-model consensus: if two independently prompted models from different vendors, given the same sources, both assert a claim with high confidence, that claim is more likely to be true — and anything only one of them asserts is dropped. This does not make the output hallucination-proof — it narrows the report to the intersection of what both models will defend, trading coverage for confidence. The repo's planning documents (`MASTERPLAN.md`, `PLAN.md`, `CONSENSUS_SYSTEM.md`) record the design iterations, including a move from a "devil's advocate" critique protocol to the current collaborative-convergence debate.
 
-- ✅ **Dual-Model Debate**: Two independent AI agents critique each other ruthlessly
-- ✅ **Grounded Research**: V1 (Offline) or V2 (Tavily search) modes
-- ✅ **Intersection Logic**: Only mutually agreed claims (A ∩ B) included
-- ✅ **Academic PDF Output**: LaTeX → PDF with dual QA (Visual + Content)
-- ✅ **Zero Hallucination**: All claims source-verified
-- ✅ **Turkish & English**: Full bilingual support
+## How it works
 
----
+The workflow (`src/workflow.py`) is a cyclic LangGraph `StateGraph` over a shared Pydantic `DebateState`:
 
-## 🏗️ Architecture
+1. **Grounding** (`src/phases/phase_1_grounding.py`) — three modes: `offline` (model knowledge only), `internet`, or `auto` (keyword heuristic decides). Internet mode queries the Tavily search API (advanced depth, top 5 results, some domains excluded) and packs the results into an immutable shared context of numbered, URL-tagged sources. Search failure falls back to offline mode.
+2. **Parallel drafting** (`src/phases/phase_2_parallel_drafting.py`) — both agents answer the question independently and concurrently from the same shared context, with no visibility into each other's output. System prompts require every claim to carry a `[Source: URL]` tag. Gemini runs at temperature 0.7, Claude at 0.5.
+3. **Iterative debate** (`src/phases/phase_3_4_iterative_debate.py`) — for up to `MAX_ROUNDS` rounds (default 3), each agent receives both previous answers and must return (a) a JSON comparison table scoring every claim as agree / partial / conflict with a 0–1 confidence and a source for each side, and (b) a revised answer. Claims that both agents mark "agree" with confidence above a per-round threshold (0.70, then 0.80, then 0.85) are **locked** and removed from further debate. Convergence requires four metrics — a symmetric intersection-based consensus, each agent's individual coverage, and their average — to all clear the threshold (default 0.95); otherwise the loop continues until max rounds ("forced stop").
+4. **Intersection synthesis** (`src/phases/phase_5_intersection.py`) — Claude, acting as a neutral referee at temperature 0.2, extracts only the claims present in both drafts, stated without hedging, and supported by the sources. Anything one-sided, uncertain, or contradicted is excluded ("when in doubt, exclude").
+5. **LaTeX generation** (`src/agents/latex_generator.py`) — Claude converts the consensus report into article-class LaTeX with Turkish (babel) support. Citation commands and reference sections are deliberately stripped from the final document.
+6. **PDF compilation** (`src/agents/pdf_compiler.py`) — `pdflatex -interaction=nonstopmode`, run twice, with up to 3 retries and a configurable timeout.
+7. **Quality assurance and approval** (`src/agents/qa_agents.py`) — Gemini Vision scores rendered page images (layout, typography, tables, appearance) and Claude scores the extracted text (completeness, structure, academic quality); if the average is below the threshold (default 75/100) the LaTeX/PDF stage regenerates, up to 2 times.
 
-### System Flow
+Supporting pieces: `src/api_clients.py` wraps both vendors' SDKs with tenacity retry/backoff and enables Google Search grounding on Gemini calls; `src/prompts.py` holds all agent personas and the debate handshake prompt; `src/schemas.py` defines the debate state, rounds, and locked claims.
 
-```
-User Question → [V1: Offline / V2: Tavily Search] →
-Parallel Drafting (Isolated, no bias) →
-Cross-Examination (Strict Critique - Ruthless) →
-Iterative Revision (Fix or Defend) →
-Intersection Synthesis (A ∩ B - Hakem) →
-LaTeX Generation → PDF Compilation →
-Visual QA (Gemini Vision) + Content QA (Claude Text) →
-[APPROVED] → Final PDF | [REJECTED] → Regenerate (Max 2x)
-```
+## Building & running
 
-### Agents
+Prerequisites:
 
-1. **Agent A - The Explorer** (Gemini 2.5 Pro)
-   - High creativity (temp=0.7)
-   - Advanced thinking capabilities
-   - Broad perspective, hypothesis generation
-   - Finds connections and different angles
+- Python (the Docker image uses `python:3.11-slim`)
+- A LaTeX distribution providing `pdflatex` (TeX Live or MiKTeX) — the compiler raises a clear error if missing
+- Poppler utilities (used by `pdf2image` for the visual QA step)
+- API keys: Anthropic, Google (Gemini), and Tavily (Tavily only needed for internet/auto mode)
 
-2. **Agent B - The Judge** (Claude Sonnet 4.5)
-   - High precision (temp=0.5)
-   - Analytical, critical, ruthless
-   - Catches weak evidence and logic errors
+Local run:
 
-3. **Hakem - The Referee** (Claude Sonnet 4.5)
-   - Conservative intersection extractor (temp=0.2)
-   - Philosophy: "When in doubt, exclude"
-   - Outputs only A ∩ B (mutual agreement)
-
----
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Python 3.11+
-- LaTeX distribution (TeX Live or MiKTeX)
-- API Keys:
-  - Anthropic (Claude)
-  - Google (Gemini)
-  - Tavily (for V2 internet mode)
-
-### Installation
-
-1. **Clone the repository**
-```bash
-git clone <repo-url>
-cd research-project-llm
-```
-
-2. **Create virtual environment**
-```bash
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-```
-
-3. **Install dependencies**
 ```bash
 pip install -r requirements.txt
-```
-
-4. **Configure environment**
-```bash
-cp .env.example .env
-# Edit .env with your API keys
-```
-
-5. **Run Streamlit app**
-```bash
+cp .env.example .env   # fill in ANTHROPIC_API_KEY, GOOGLE_API_KEY, TAVILY_API_KEY
 streamlit run app.py
 ```
 
-6. **Open browser**: http://localhost:8501
+The UI serves on `http://localhost:8501`. Generated PDFs, LaTeX sources, and logs land in `./output/`.
 
----
-
-## 🐳 Docker Deployment
-
-### Build and Run
+Docker (installs TeX Live and Poppler for you):
 
 ```bash
-docker-compose up -d
+docker compose up --build
 ```
 
-### Access
+Configuration is environment-driven (`.env.example` lists everything): model IDs (`CLAUDE_MODEL`, default `claude-sonnet-4-5-20250929`; `GEMINI_MODEL`, default `gemini-1.5-pro-latest`), `MAX_ROUNDS`, `CONVERGENCE_THRESHOLD`, `QA_THRESHOLD`, LaTeX timeouts/retries, and output paths.
 
-- UI: http://localhost:8501
-- Logs: `./output/logs/`
-- PDFs: `./output/pdfs/`
+## Status & caveats
 
----
+A working prototype, honestly rough in places. Known limitations observed in the code and in past runs:
 
-## 📖 Usage
+- **Debate JSON parsing is fragile.** The agents are asked to emit strict JSON plus free text; in practice the JSON parse can fail and fall back to regex extraction, which pegs consensus near 50% — so runs often end at max rounds ("forced stop") rather than by natural convergence.
+- **The final PDF contains no citations.** Source attribution is enforced in drafts and debate tables, but `strip_citations` removes all citation markers, reference numbers, and bibliographies from the final LaTeX by design.
+- **Debate output does not feed the final report.** Intersection synthesis consumes the original Phase-2 drafts; the revised answers and locked-claim list produced by the debate loop currently gate convergence but are not passed to the referee stage.
+- **Language:** the UI and most prompts are Turkish; reports compile with Turkish babel support.
+- **Search behavior:** Tavily runs only in `internet` mode; `auto` selects internet only when time-sensitive keywords match, and any search failure silently falls back to offline (training-data) mode. Separately, Gemini calls enable Google Search grounding, so evidence gathering is not exclusively Tavily.
+- **Dead and stray code:** older phase implementations (`phase_3_cross_examination.py`, `phase_4_convergence.py`) remain in the tree but are no longer wired into the workflow; `src/utils/citation_validator.py` is unused; ad-hoc API test scripts (`test_api.py`, `test_gemini_*.py`, `test_simple.py`, `list_models_new.py`) sit at the repo root.
+- **Dependency age:** some pins are dated (e.g. `langgraph==0.0.32`), and the default `gemini-1.5-pro-latest` model ID may need updating.
 
-### Streamlit UI
+## License
 
-1. Enter your research question (Turkish or English)
-2. Select mode:
-   - **Auto**: Keyword-based decision (recommended)
-   - **Internet**: Always use Tavily search
-   - **Offline**: Use only internal knowledge
-3. Adjust debate parameters (max rounds, threshold)
-4. Click "🔍 Araştır"
-5. Download PDF when ready
-
-### Python API
-
-```python
-from src import run_research, setup_logging
-
-# Setup logging
-setup_logging()
-
-# Run research
-final_state = run_research(
-    topic="What are the applications of AI in medicine?",
-    research_mode="auto",  # or "internet" or "offline"
-    max_rounds=3,
-    convergence_threshold=0.95
-)
-
-# Access results
-print(f"PDF: {final_state.pdf_path}")
-print(f"QA Score: {final_state.average_qa_score:.1f}/100")
-print(f"Consensus: {final_state.similarity_score:.1%}")
-```
-
----
-
-## 🎯 Research Modes
-
-### V1: Offline Mode
-- **No internet search**
-- Uses only LLM training data
-- Fast, low-cost
-- Best for: General knowledge, static topics
-
-### V2: Internet Mode
-- **Tavily API search** (advanced depth)
-- Grounded in current web sources
-- Higher cost, slightly slower
-- Best for: Current events, recent data, specific facts
-
-### Auto Mode (Recommended)
-- **Keyword-based decision**
-- Detects time-sensitive keywords (news, price, latest, 2024, etc.)
-- Automatically switches between V1/V2
-- Best for: General use
-
----
-
-## 📊 Configuration
-
-Edit `.env` file:
-
-```bash
-# API Keys
-ANTHROPIC_API_KEY=sk-ant-xxx
-GOOGLE_API_KEY=AIzaXXX
-TAVILY_API_KEY=tvly-xxx
-
-# Models
-CLAUDE_MODEL=claude-sonnet-4-5-20250929
-GEMINI_MODEL=gemini-2.5-pro
-
-# Debate Settings
-MAX_ROUNDS=3
-CONVERGENCE_THRESHOLD=0.95
-
-# QA Settings
-QA_THRESHOLD=75
-MAX_PDF_REGENERATIONS=2
-```
-
----
-
-## 🔬 Technical Details
-
-### State Machine
-
-The system uses LangGraph's cyclic state graph:
-
-- **Debate Loop**: Phases 2-4 repeat until convergence or max rounds
-- **PDF Loop**: Regenerates if QA fails (max 2x)
-- **State**: Single `DebateState` object passed through all nodes
-
-### Key Algorithms
-
-1. **Semantic Similarity** (LLM-based)
-   - Claude evaluates semantic equivalence
-   - Ignores surface form differences
-   - Focuses on factual agreement
-
-2. **Intersection Synthesis** (A ∩ B)
-   - Conservative principle: "5 certain facts > 10 doubtful facts"
-   - Excludes any claim with uncertainty
-   - Requires mutual agreement + source support
-
-3. **Dual QA**
-   - Visual: Gemini Vision analyzes PDF page images
-   - Content: Claude checks text completeness & citations
-   - Average must pass threshold (default: 75/100)
-
----
-
-## 📂 Project Structure
-
-```
-research-project-llm/
-├── src/
-│   ├── __init__.py
-│   ├── config.py           # Configuration management
-│   ├── schemas.py          # Pydantic models
-│   ├── prompts.py          # All system prompts
-│   ├── api_clients.py      # Claude & Gemini wrappers
-│   ├── workflow.py         # LangGraph orchestration
-│   ├── phases/             # 5 debate phases
-│   │   ├── phase_1_grounding.py
-│   │   ├── phase_2_parallel_drafting.py
-│   │   ├── phase_3_cross_examination.py
-│   │   ├── phase_4_convergence.py
-│   │   └── phase_5_intersection.py
-│   └── agents/             # PDF pipeline agents
-│       ├── latex_generator.py
-│       ├── pdf_compiler.py
-│       └── qa_agents.py
-├── output/
-│   ├── pdfs/              # Generated PDFs
-│   ├── latex/             # LaTeX source files
-│   └── logs/              # Application logs
-├── app.py                 # Streamlit UI
-├── requirements.txt
-├── Dockerfile
-├── docker-compose.yml
-├── .env.example
-├── .gitignore
-├── PLAN.md               # Original design document
-└── README.md
-```
-
----
-
-## 🧪 Testing
-
-### Manual Test
-
-```bash
-# Test offline mode
-python -c "from src import run_research; run_research('Explain quantum computing', research_mode='offline')"
-
-# Test internet mode
-python -c "from src import run_research; run_research('Latest AI news 2024', research_mode='internet')"
-```
-
-### Check Output
-
-```bash
-ls -l output/pdfs/
-```
-
----
-
-## 🐛 Troubleshooting
-
-### LaTeX Compilation Fails
-
-**Problem**: `pdflatex not found`
-
-**Solution**: Install LaTeX distribution
-- **Linux**: `sudo apt-get install texlive-full`
-- **macOS**: `brew install --cask mactex`
-- **Windows**: Download MiKTeX from miktex.org
-
-### API Key Errors
-
-**Problem**: Missing or invalid API keys
-
-**Solution**:
-1. Check `.env` file exists
-2. Verify key format (no quotes, no spaces)
-3. Test keys individually
-
-### PDF2Image Errors
-
-**Problem**: `poppler not found`
-
-**Solution**: Install Poppler
-- **Linux**: `sudo apt-get install poppler-utils`
-- **macOS**: `brew install poppler`
-- **Windows**: Download from poppler.freedesktop.org
-
----
-
-## 📈 Performance
-
-**Typical Execution:**
-- Debate: 2-3 minutes
-- LaTeX generation: 10-20 seconds
-- PDF compilation: 5-10 seconds
-- QA: 20-30 seconds
-- **Total: ~3-5 minutes**
-
-**Cost (V2 Mode):**
-- ~$0.15-0.25 per query
-- Depends on: question complexity, debate rounds, regenerations
-
----
-
-## 🔒 Security
-
-- API keys stored in `.env` (never commit!)
-- No user data persistence
-- LaTeX sandboxed execution
-- Output files isolated in `./output/`
-
----
-
-## 🤝 Contributing
-
-Contributions welcome! Areas for improvement:
-
-- [ ] Streaming output (real-time progress)
-- [ ] Multi-language support (beyond Turkish/English)
-- [ ] Custom agent personalities
-- [ ] Benchmark on academic datasets (TruthfulQA, FactScore)
-- [ ] Cost optimization (caching, prompt compression)
-- [ ] Performance optimization (async everything)
-
----
-
-## 📄 License
-
-MIT License - See LICENSE file
-
----
-
-## 🙏 Acknowledgments
-
-- **Anthropic** for Claude Sonnet 4.5
-- **Google** for Gemini Pro 1.5
-- **Tavily** for advanced search API
-- **LangChain/LangGraph** for orchestration
-
----
-
-## 📞 Contact
-
-For issues and questions:
-- GitHub Issues: [Create an issue]
-- Documentation: See `PLAN.md` for detailed architecture
-
----
-
-## 🎯 Roadmap
-
-**v1.0** (Current)
-- ✅ Core debate system
-- ✅ PDF generation
-- ✅ Dual QA
-- ✅ Streamlit UI
-
-**v1.1** (Planned)
-- ⏳ Streaming responses
-- ⏳ Multi-format export (Word, HTML)
-- ⏳ Citation graph visualization
-
-**v2.0** (Future)
-- 🔮 Multi-agent (3+ models)
-- 🔮 Specialized domain agents (medical, legal, etc.)
-- 🔮 Interactive debate viewer
-
----
-
-**Built with ❤️ using the power of adversarial AI debate**
-
-*"Truth emerges when independent minds rigorously test each other's claims."*
-#   r e s e a r c h - a g e n t  
- 
+MIT — see [LICENSE](LICENSE).
