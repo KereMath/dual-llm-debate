@@ -90,6 +90,9 @@ class TestInventoryDrivenLocking:
                                                  inventory_map=inventory)
         assert len(locked) == 1
         assert locked[0].statement == "Water boils at 100C at sea level"
+        # Each agent's own (possibly narrowed) wording is preserved alongside
+        assert locked[0].resolution_gemini == "H2O reaches boiling at one hundred degrees"
+        assert locked[0].resolution_claude == "Sea-level boiling temperature is 100 Celsius"
 
     def test_non_inventory_id_still_guarded(self):
         inventory = {1: "Water boils at 100C at sea level"}
@@ -107,6 +110,63 @@ class TestInventoryDrivenLocking:
         # ...with the id in the inventory, the pair counts
         assert debate.calculate_symmetric_consensus(gemini, claude,
                                                     inventory_ids={1}) == 1.0
+
+
+class TestExtendClaimInventory:
+    def base_state(self):
+        state = make_state()
+        state.claim_inventory = [InventoryClaim(claim_id=1, statement="Existing claim")]
+        return state
+
+    def test_appends_new_claims_with_continued_ids(self, monkeypatch):
+        captured = {}
+
+        def fake_structured(**kw):
+            captured.update(kw)
+            return {"claims": [{"claim_id": 2, "statement": "Brand new claim"}]}
+
+        monkeypatch.setattr(debate, "call_claude_structured", fake_structured)
+        state = debate.extend_claim_inventory(self.base_state())
+
+        assert [c.claim_id for c in state.claim_inventory] == [1, 2]
+        assert "claim_id 2" in captured["prompt"]          # next_id passed
+        assert "Existing claim" in captured["prompt"]       # existing list shown
+        assert captured["temperature"] == 0.0
+
+    def test_colliding_ids_are_dropped(self, monkeypatch):
+        monkeypatch.setattr(debate, "call_claude_structured",
+                            lambda **kw: {"claims": [
+                                {"claim_id": 1, "statement": "collides with existing"},
+                                {"claim_id": 5, "statement": "kept"},
+                            ]})
+        state = debate.extend_claim_inventory(self.base_state())
+        assert [c.claim_id for c in state.claim_inventory] == [1, 5]
+        assert state.claim_inventory[0].statement == "Existing claim"
+
+    def test_failure_keeps_inventory_unchanged(self, monkeypatch):
+        def boom(**kw):
+            raise RuntimeError("api down")
+        monkeypatch.setattr(debate, "call_claude_structured", boom)
+        state = debate.extend_claim_inventory(self.base_state())
+        assert [c.claim_id for c in state.claim_inventory] == [1]
+
+    def test_loop_extends_between_rounds_but_not_after_last(self, monkeypatch):
+        payload = {
+            "comparison_table": [], "consensus_score": 0.5,
+            "convergence_status": "continue", "revised_answer": "ans",
+        }
+        monkeypatch.setattr(debate, "call_gemini_structured", lambda **kw: payload)
+        monkeypatch.setattr(debate, "call_claude_structured", lambda **kw: payload)
+        monkeypatch.setattr(debate, "ensure_claim_inventory", lambda s: s)
+
+        calls = []
+        monkeypatch.setattr(debate, "extend_claim_inventory",
+                            lambda s: (calls.append(1), s)[1])
+
+        state = debate.run_debate_loop(make_state(max_rounds=2))
+        assert state.iteration_counter == 2
+        # extended after round 1 only — never after the final round
+        assert len(calls) == 1
 
 
 class TestNoDuplicateLocks:

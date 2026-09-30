@@ -302,7 +302,13 @@ class LockedClaim(BaseModel):
     A claim that both agents agreed on with high confidence
     Locked claims are not re-debated in future rounds
     """
-    statement: str = Field(description="The agreed-upon statement")
+    statement: str = Field(description="Canonical statement (from the claim inventory when available)")
+    resolution_gemini: Optional[str] = Field(
+        default=None,
+        description="Gemini's final wording — may narrow/qualify the canonical statement")
+    resolution_claude: Optional[str] = Field(
+        default=None,
+        description="Claude's final wording — may narrow/qualify the canonical statement")
     source_gemini: Optional[str] = Field(default=None)
     source_claude: Optional[str] = Field(default=None)
     locked_round: int = Field(description="Round when this was locked")
@@ -332,10 +338,13 @@ class ClaimInventoryOutput(BaseModel):
 
 class ComparisonClaimOutput(BaseModel):
     """One row of the claim-by-claim comparison table, as the model must emit it"""
-    claim_id: int = Field(description="Unique claim number, same across both agents")
-    resolution: str = Field(description="Short final statement of this claim (max ~200 chars)")
-    status: Literal["agree", "conflict", "partial"] = Field(description="Agreement status")
-    your_confidence: float = Field(description="Your confidence in this claim, 0.0-1.0")
+    claim_id: int = Field(description="The claim's canonical id from the inventory")
+    resolution: str = Field(description="Your final wording of this claim (max ~200 chars)")
+    status: Literal["agree", "conflict", "partial"] = Field(
+        description="agree = I endorse this claim as stated; "
+                    "partial = I endorse only a narrower/qualified version (state it in resolution); "
+                    "conflict = I dispute this claim")
+    your_confidence: float = Field(description="Your confidence that this claim is TRUE, 0.0-1.0")
     other_confidence: float = Field(description="Other agent's apparent confidence, 0.0-1.0")
     your_source: Optional[str] = Field(default=None, description="Your source URL/reference")
     other_source: Optional[str] = Field(default=None, description="Other agent's source")

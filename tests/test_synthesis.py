@@ -133,3 +133,18 @@ class TestLockedClaimFormatting:
         )
         text = phase5.format_locked_claims_for_synthesis([claim])
         assert text.count("https://same.url") == 1
+
+    def test_narrowed_agent_wording_is_surfaced(self):
+        # If an agent endorsed a narrower version, the referee must see it
+        claim = LockedClaim(
+            statement="LLMs improve diagnostic accuracy",
+            resolution_gemini="LLMs improve diagnostic accuracy",
+            resolution_claude="LLMs improve diagnostic accuracy in US hospitals only",
+            locked_round=1,
+            confidence_avg=0.9,
+        )
+        text = phase5.format_locked_claims_for_synthesis([claim])
+        assert "in US hospitals only" in text
+        # Identical wording is NOT repeated as a separate line
+        assert text.count("Gemini ifadesi") == 0
+        assert text.count("Claude ifadesi") == 1

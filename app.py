@@ -401,10 +401,17 @@ if "final_state" in st.session_state:
     # Locked claims table
     st.markdown("#### 🔒 Locked claims (endorsed by both models)")
     if fs.locked_agreements:
+        def agents_wording(c):
+            canonical = c.statement.strip().lower()
+            parts = [w.strip() for w in (c.resolution_gemini, c.resolution_claude)
+                     if w and w.strip().lower() != canonical]
+            return " | ".join(dict.fromkeys(parts)) or "—"
+
         st.dataframe(
             pd.DataFrame([
                 {
-                    "Claim": c.statement,
+                    "Claim (canonical)": c.statement,
+                    "Agents' wording (if narrowed)": agents_wording(c),
                     "Round": c.locked_round,
                     "Confidence": round(c.confidence_avg, 2),
                     "Source (Gemini)": c.source_gemini or "—",

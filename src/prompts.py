@@ -112,6 +112,31 @@ Distill both drafts into one merged, numbered list of atomic claims
 (claim_id 1..N). Both debate agents will evaluate exactly these ids.
 """
 
+PROMPT_CLAIM_INVENTORY_EXTEND = """A debate round just finished. Extend the canonical claim inventory
+with claims that are GENUINELY NEW in the agents' revised answers.
+
+RESEARCH QUESTION:
+{topic}
+
+EXISTING INVENTORY (do NOT repeat or rephrase these):
+{existing_inventory}
+
+REVISED ANSWER A (Explorer - Gemini):
+{gemini_answer}
+
+REVISED ANSWER B (Judge - Claude):
+{claude_answer}
+
+Rules:
+- Output ONLY claims not already covered by the existing inventory
+  (no duplicates, no rephrasings, no narrower variants of existing claims)
+- Same format rules as before: atomic, neutral, one sentence, <=200 chars,
+  same language as the answers
+- Continue numbering EXACTLY from claim_id {next_id}
+- If there is nothing genuinely new, return an empty list - that is a
+  perfectly good answer
+"""
+
 
 # ═══════════════════════════════════════════════════════════
 # HAKEM (SYNTHESIZER): Intersection Logic (A ∩ B)
@@ -506,10 +531,12 @@ You must:
    |---------|----------------|-------------------|-------------|----------------|--------|------------|-----------------|-------------------|
    | 1       | ...            | ...               | [url]       | [url]          | ✓/✗/⚠  | ...        | 0.0-1.0         | 0.0-1.0          |
 
-   Status Legend:
-   ✓ AGREE    - Both say same thing with comparable sources
-   ✗ CONFLICT - Direct contradiction or incompatible claims
-   ⚠ PARTIAL  - Similar but with nuances/caveats
+   Status Legend (judged against the CANONICAL INVENTORY claim):
+   ✓ AGREE    - I ENDORSE this claim AS STATED (evidence supports it)
+   ✗ CONFLICT - I DISPUTE this claim (evidence contradicts it or is missing)
+   ⚠ PARTIAL  - I endorse only a NARROWER/QUALIFIED version - write that
+                exact narrower version in "resolution". Do NOT mark AGREE
+                if your resolution narrows the claim (e.g. "only in the US").
 
    Confidence Scale (0.0-1.0):
    0.9-1.0: Very confident, strong primary sources

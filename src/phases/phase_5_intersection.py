@@ -34,6 +34,14 @@ def format_locked_claims_for_synthesis(locked: List[LockedClaim]) -> str:
             f"{i}. {claim.statement}{source_str} "
             f"(Tur {claim.locked_round}, güven: {claim.confidence_avg:.2f})"
         )
+        # Surface each agent's own wording when it differs from the
+        # canonical statement - a narrowed/qualified version is a nuance
+        # the referee must respect, not overwrite
+        canonical = claim.statement.strip().lower()
+        for label, wording in (("Gemini", claim.resolution_gemini),
+                               ("Claude", claim.resolution_claude)):
+            if wording and wording.strip().lower() != canonical:
+                lines.append(f"   ({label} ifadesi: {wording.strip()})")
 
     return "\n".join(lines)
 

@@ -21,6 +21,7 @@ from src.api_clients import (
 from src.prompts import (
     PROMPT_COMPARISON_HANDSHAKE,
     PROMPT_CLAIM_INVENTORY,
+    PROMPT_CLAIM_INVENTORY_EXTEND,
     SYSTEM_PROMPT_GEMINI_EXPLORER,
     SYSTEM_PROMPT_CLAUDE_JUDGE,
     SYSTEM_PROMPT_CLAIM_EXTRACTOR,
@@ -79,6 +80,49 @@ def ensure_claim_inventory(state: DebateState) -> DebateState:
         logger.warning(f"  ⚠️ Claim inventory extraction failed ({e}) - "
                        f"debate falls back to per-agent numbering + similarity guard")
         state.add_error(f"Claim inventory extraction failed: {e}")
+
+    return state
+
+
+def extend_claim_inventory(state: DebateState) -> DebateState:
+    """Append genuinely NEW claims surfaced in the latest revised answers.
+
+    Called between rounds so a claim that first appears in round 2 can
+    still be locked in round 3 (the initial inventory only sees the
+    phase-2 drafts). Failures never block the debate.
+    """
+    if not state.claim_inventory:
+        # Initial extraction failed earlier - retry the full extraction
+        # from the latest answers instead of extending nothing
+        return ensure_claim_inventory(state)
+
+    next_id = max(c.claim_id for c in state.claim_inventory) + 1
+    try:
+        data = call_claude_structured(
+            prompt=PROMPT_CLAIM_INVENTORY_EXTEND.format(
+                topic=state.topic,
+                existing_inventory=format_claim_inventory(state.claim_inventory),
+                gemini_answer=state.get_latest_gemini_answer(),
+                claude_answer=state.get_latest_claude_answer(),
+                next_id=next_id,
+            ),
+            system_prompt=SYSTEM_PROMPT_CLAIM_EXTRACTOR,
+            schema=ClaimInventoryOutput.model_json_schema(),
+            tool_name="submit_claim_inventory",
+            temperature=0.0,
+        )
+        new_claims = ClaimInventoryOutput.model_validate(data).claims
+        existing_ids = {c.claim_id for c in state.claim_inventory}
+        added = [c for c in new_claims
+                 if c.statement.strip() and c.claim_id not in existing_ids]
+        if added:
+            state.claim_inventory.extend(added)
+            logger.info(f"  ➕ Inventory extended with {len(added)} new claim(s) "
+                        f"(now {len(state.claim_inventory)})")
+        else:
+            logger.info("  Inventory extension: no genuinely new claims")
+    except Exception as e:
+        logger.warning(f"  ⚠️ Inventory extension failed ({e}) - continuing with current inventory")
 
     return state
 
@@ -604,6 +648,11 @@ def identify_lockable_claims(
 
             locked = LockedClaim(
                 statement=statement,
+                # Keep each agent's final wording too: an agent may have
+                # narrowed the canonical claim in its resolution, and the
+                # synthesizer must see that nuance
+                resolution_gemini=(g_claim.get("resolution") or "").strip() or None,
+                resolution_claude=(c_claim.get("resolution") or "").strip() or None,
                 source_gemini=g_claim.get("your_source"),
                 source_claude=c_claim.get("your_source"),
                 locked_round=round_num,
@@ -949,6 +998,11 @@ def run_debate_loop(state: DebateState) -> DebateState:
         if state.converged:
             logger.info(f"✅ Natural convergence reached at {state.similarity_score:.1%}")
             break
+
+        # Before the next round, append genuinely new claims from the
+        # revised answers so late-emerging claims can still be locked
+        if state.iteration_counter < state.max_rounds:
+            state = extend_claim_inventory(state)
 
     # Check if forced stop
     if not state.converged:
