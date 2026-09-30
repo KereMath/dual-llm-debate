@@ -1,5 +1,8 @@
 # Implementation Summary - SOTA Dual-LLM Research System
 
+> **Historical design document.** This file records a mid-development plan/status snapshot and is kept for context. Parts of it describe features that were later removed or changed (e.g. devil's-advocate alternation, cross-examination phases, citation validator). See README.md for the current behavior.
+
+
 **Date:** 2026-01-14
 **Status:** ✅ **COMPLETE** - All masterplan tasks implemented
 

@@ -54,33 +54,60 @@ def wrap_node(func):
 # WORKFLOW BUILDER
 # ═══════════════════════════════════════════════════════════
 
+def should_regenerate_pdf(state: DebateState) -> Literal["pdf_revision", "end"]:
+    """
+    Decide whether to regenerate the PDF after the approval decision.
+
+    - Approved → end
+    - QA failed (infrastructure error, no trustworthy assessment) → end;
+      regeneration cannot fix a QA failure, and the run is explicitly
+      NOT approved (state.pdf_approved stays False)
+    - Rejected on score → regenerate, up to MAX_PDF_REGENERATIONS
+    """
+    if state.pdf_approved:
+        return "end"
+
+    if state.qa_failed:
+        logger.error("QA failed — ending WITHOUT approval (regeneration cannot fix a QA failure)")
+        return "end"
+
+    if state.pdf_regeneration_count < config.MAX_PDF_REGENERATIONS:
+        return "pdf_revision"
+
+    logger.warning(f"Max PDF regenerations ({config.MAX_PDF_REGENERATIONS}) reached — ending unapproved")
+    return "end"
+
+
 def build_research_workflow() -> StateGraph:
     """
     Döngüsel Durum Makinesi (Cyclic State Machine)
 
     GRAPH STRUCTURE:
 
-    START → grounding → parallel_drafting → cross_examination → convergence
-                                                   ↑                 ↓
-                                                   └─────NO──────────┘
-                                                                 ↓ YES
-                                                        intersection_synthesis
-                                                                 ↓
-                                                         latex_generation
-                                                                 ↓
-                                                         pdf_compilation
-                                                                 ↓
-                                                        quality_assurance
-                                                                 ↓
-                                                        approval_decision
-                                                                 ↓
-                                                     ┌───────────┴───────────┐
-                                                     │                       │
-                                                [APPROVED]              [REJECTED]
-                                                     │                       │
-                                                    END                 pdf_revision
-                                                                             ↓
-                                                                      (loop to compilation)
+    START → grounding → parallel_drafting → iterative_debate
+                                            (internal loop: compare → lock
+                                             claims → revise, until converged
+                                             or max rounds)
+                                                       ↓
+                                            intersection_synthesis
+                                            (locked claims + final revised
+                                             answers → consensus report)
+                                                       ↓
+                                               latex_generation
+                                                       ↓
+                                               pdf_compilation
+                                                       ↓
+                                              quality_assurance
+                                                       ↓
+                                              approval_decision
+                                                       ↓
+                                           ┌───────────┴────────────────┐
+                                           │                            │
+                                    [APPROVED or QA FAILED]     [REJECTED on score]
+                                           │                            │
+                                          END                      pdf_revision
+                                                                        ↓
+                                                              (loop to latex_generation)
     """
 
     workflow = StateGraph(DebateState)
@@ -129,19 +156,7 @@ def build_research_workflow() -> StateGraph:
     # NOTE: Debate loop is now INTERNAL to iterative_debate node
     # No conditional edge needed - it handles convergence internally
 
-    # LOOP 2: PDF regeneration loop
-    def should_regenerate_pdf(state: DebateState) -> Literal["pdf_revision", "end"]:
-        if state.pdf_approved:
-            return "end"
-        else:
-            # Check if we can regenerate
-            if state.pdf_regeneration_count < config.MAX_PDF_REGENERATIONS:
-                return "pdf_revision"
-            else:
-                # Max regenerations reached, end anyway
-                logger.warning(f"Max PDF regenerations ({config.MAX_PDF_REGENERATIONS}) reached")
-                return "end"
-
+    # LOOP 2: PDF regeneration loop (see module-level should_regenerate_pdf)
     workflow.add_conditional_edges(
         "approval_decision",
         should_regenerate_pdf,

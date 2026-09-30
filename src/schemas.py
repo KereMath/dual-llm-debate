@@ -82,9 +82,6 @@ class DebateState(BaseModel):
     gemini_draft: str = Field(default="", description="Explorer's current draft")
     claude_draft: str = Field(default="", description="Judge's current draft")
 
-    gemini_critique: str = Field(default="", description="Explorer's critique of Judge")
-    claude_critique: str = Field(default="", description="Judge's critique of Explorer")
-
     # ───────────────────────────────────────────────────────
     # LOOP CONTROL (Counters and flags)
     # ───────────────────────────────────────────────────────
@@ -129,6 +126,10 @@ class DebateState(BaseModel):
     average_qa_score: float = Field(default=0.0, description="Average QA score")
 
     pdf_approved: bool = Field(default=False, description="PDF passed QA?")
+    qa_failed: bool = Field(
+        default=False,
+        description="QA could not be performed (API/parse error) — PDF is explicitly NOT approved"
+    )
 
     # ───────────────────────────────────────────────────────
     # METADATA & DIAGNOSTICS
@@ -202,8 +203,7 @@ class DebateState(BaseModel):
         if round_data.convergence_status == "converged":
             self.converged = True
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = {"arbitrary_types_allowed": True}
 
 
 # ═══════════════════════════════════════════════════════════

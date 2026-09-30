@@ -1,4 +1,7 @@
 # 🎯 Research & Publishing Machine - Final System Design v4.0
+
+> **Historical design document.** This file records a mid-development plan/status snapshot and is kept for context. Parts of it describe features that were later removed or changed (e.g. devil's-advocate alternation, cross-examination phases, citation validator). See README.md for the current behavior.
+
 **Version:** 4.0 FINAL (Aligned with lastplan.md)
 **Architecture:** Multi-Agent Debate with Grounded Intersection → Academic PDF Publication
 **Core Philosophy:** "Doğruluk, iki bağımsız zekanın anlaşmazlık sonrası vardığı ortak paydadır."

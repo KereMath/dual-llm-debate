@@ -1,7 +1,7 @@
 # 4-Way Consensus System (SOTA)
 
 ## Overview
-This system uses **4 independent metrics** to ensure true convergence between Gemini and Claude agents. ALL 4 metrics must reach the threshold (default: 85%) for convergence.
+This system uses **4 independent metrics** to ensure true convergence between Gemini and Claude agents. ALL 4 metrics must reach the convergence threshold (code default: **95%**, `CONVERGENCE_THRESHOLD` in `.env`; the examples below use 0.85 for illustration) for convergence.
 
 ---
 
@@ -138,11 +138,11 @@ Round 1: Iterative Debate
 ### `.env` Settings
 ```env
 MAX_ROUNDS=999  # Effectively unlimited - stops when converged
-CONVERGENCE_THRESHOLD=0.85  # All 4 metrics must reach 85%
+CONVERGENCE_THRESHOLD=0.95  # Code default; all 4 metrics must reach it
 ```
 
 ### Why 999 rounds?
-- System will stop when ALL 4 metrics >= 85%
+- System will stop when ALL 4 metrics >= CONVERGENCE_THRESHOLD
 - No arbitrary round limit (2-3 rounds)
 - Ensures quality over speed
 - Typical convergence: 3-7 rounds depending on topic complexity

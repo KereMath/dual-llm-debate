@@ -1,6 +1,10 @@
 """
 QA Agents
 Visual QA (Gemini Vision) + Content QA (Claude)
+
+QA failures are EXPLICIT: if a QA model errors or returns unparseable JSON,
+the node marks the run as failed (qa_failed) instead of silently
+auto-approving with a default score.
 """
 
 import logging
@@ -15,12 +19,23 @@ from ..config import config
 logger = logging.getLogger(__name__)
 
 
+class QAFailure(Exception):
+    """QA could not be performed (API error or unparseable response).
+
+    Distinct from a low QA score: a low score means the PDF was assessed
+    and found lacking; QAFailure means no trustworthy assessment exists.
+    """
+
+
 def quality_assurance_node(state: DebateState) -> DebateState:
     """
     Perform dual QA: Visual (Gemini) + Content (Claude)
 
     Input: state.pdf_path
     Output: state.visual_qa_score, state.content_qa_score, state.average_qa_score
+
+    On any QA failure (API error, unparseable JSON, PDF processing error)
+    the run is marked qa_failed=True with zero scores — never auto-approved.
     """
 
     logger.info("Quality Assurance: Running Dual QA")
@@ -28,6 +43,7 @@ def quality_assurance_node(state: DebateState) -> DebateState:
     if not state.pdf_path or not Path(state.pdf_path).exists():
         logger.error("PDF file not found")
         state.add_error("QA: PDF file missing")
+        state.qa_failed = True
         return state
 
     try:
@@ -56,12 +72,15 @@ def quality_assurance_node(state: DebateState) -> DebateState:
         return state
 
     except Exception as e:
-        logger.error(f"QA failed: {e}")
-        state.add_error(f"QA error: {str(e)}")
-        # Set low scores on error
+        logger.error(f"❌ QA FAILED - no trustworthy quality assessment: {e}")
+        state.add_error(f"QA failure: {str(e)}")
+        # Explicit failure: zero scores, qa_failed flag set.
+        # The approval decision will reject the PDF and the workflow will
+        # NOT regenerate (regeneration cannot fix a QA infrastructure error).
         state.visual_qa_score = 0.0
         state.content_qa_score = 0.0
         state.average_qa_score = 0.0
+        state.qa_failed = True
         return state
 
 
@@ -69,13 +88,16 @@ def approval_decision_node(state: DebateState) -> DebateState:
     """
     Decide if PDF passes QA threshold
 
-    Input: state.average_qa_score
+    Input: state.average_qa_score, state.qa_failed
     Output: state.pdf_approved
     """
 
     threshold = config.QA_THRESHOLD
 
-    if state.average_qa_score >= threshold:
+    if state.qa_failed:
+        state.pdf_approved = False
+        logger.error("❌ PDF NOT APPROVED - QA could not be performed (see error log)")
+    elif state.average_qa_score >= threshold:
         state.pdf_approved = True
         logger.info(f"✅ PDF APPROVED (Score: {state.average_qa_score:.1f} >= {threshold})")
     else:
@@ -242,40 +264,28 @@ Return JSON format as specified in system prompt.
         # Robust JSON parsing - extract JSON from markdown code blocks or plain text
         result = extract_json_from_response(response)
 
-        if not result:
-            # Fallback: Auto-approve with high score if JSON fails
-            logger.warning("Visual QA: JSON parse failed, auto-approving with default score")
-            return VisualQAScore(
-                score=85.0,
-                feedback="Auto-approved (JSON parse failed)",
-                criteria_scores={"layout": 85, "typography": 85, "tables_figures": 85, "professional": 85},
-                passed=True,
-                layout_score=85,
-                typography_score=85,
-                tables_figures_score=85,
-                professional_score=85
+        if not result or "score" not in result:
+            # Explicit failure - no silent auto-approval
+            raise QAFailure(
+                f"Visual QA: could not parse a score from the model response "
+                f"(first 200 chars: {response[:200]!r})"
             )
 
         return VisualQAScore(
-            score=result.get("score", 85),
+            score=result["score"],
             feedback=result.get("feedback", ""),
             criteria_scores=result.get("criteria_scores", {}),
-            passed=(result.get("score", 85) >= config.QA_THRESHOLD),
-            layout_score=result.get("criteria_scores", {}).get("layout", 85),
-            typography_score=result.get("criteria_scores", {}).get("typography", 85),
-            tables_figures_score=result.get("criteria_scores", {}).get("tables_figures", 85),
-            professional_score=result.get("criteria_scores", {}).get("professional", 85)
+            passed=(result["score"] >= config.QA_THRESHOLD),
+            layout_score=result.get("criteria_scores", {}).get("layout", 0),
+            typography_score=result.get("criteria_scores", {}).get("typography", 0),
+            tables_figures_score=result.get("criteria_scores", {}).get("tables_figures", 0),
+            professional_score=result.get("criteria_scores", {}).get("professional", 0)
         )
 
+    except QAFailure:
+        raise
     except Exception as e:
-        logger.error(f"Visual QA failed: {e}")
-        # Auto-approve on error to prevent blocking
-        return VisualQAScore(
-            score=85.0,
-            feedback=f"Auto-approved due to error: {str(e)}",
-            criteria_scores={},
-            passed=True
-        )
+        raise QAFailure(f"Visual QA API call failed: {e}") from e
 
 
 def run_content_qa(pdf_text: str, original_consensus: str, research_question: str = "") -> ContentQAScore:
@@ -325,37 +335,25 @@ Return JSON format as specified in system prompt.
         # Robust JSON parsing
         result = extract_json_from_response(response)
 
-        if not result:
-            # Fallback: Auto-approve with high score if JSON fails (updated weights)
-            logger.warning("Content QA: JSON parse failed, auto-approving with default score")
-            return ContentQAScore(
-                score=85.0,
-                feedback="Auto-approved (JSON parse failed)",
-                criteria_scores={"completeness": 30, "citations": 22, "structure": 17, "academic": 17},
-                passed=True,
-                completeness_score=30,  # Max 35
-                citation_score=22,      # Max 25
-                structure_score=17,     # Max 20
-                academic_score=17       # Max 20
+        if not result or "score" not in result:
+            # Explicit failure - no silent auto-approval
+            raise QAFailure(
+                f"Content QA: could not parse a score from the model response "
+                f"(first 200 chars: {response[:200]!r})"
             )
 
         return ContentQAScore(
-            score=result.get("score", 85),
+            score=result["score"],
             feedback=result.get("feedback", ""),
             criteria_scores=result.get("criteria_scores", {}),
-            passed=(result.get("score", 85) >= config.QA_THRESHOLD),
-            completeness_score=result.get("criteria_scores", {}).get("completeness", 30),
-            citation_score=result.get("criteria_scores", {}).get("citations", 22),
-            structure_score=result.get("criteria_scores", {}).get("structure", 17),
-            academic_score=result.get("criteria_scores", {}).get("academic", 17)
+            passed=(result["score"] >= config.QA_THRESHOLD),
+            completeness_score=result.get("criteria_scores", {}).get("completeness", 0),
+            citation_score=result.get("criteria_scores", {}).get("citations", 0),
+            structure_score=result.get("criteria_scores", {}).get("structure", 0),
+            academic_score=result.get("criteria_scores", {}).get("academic", 0)
         )
 
+    except QAFailure:
+        raise
     except Exception as e:
-        logger.error(f"Content QA failed: {e}")
-        # Auto-approve on error to prevent blocking
-        return ContentQAScore(
-            score=85.0,
-            feedback=f"Auto-approved due to error: {str(e)}",
-            criteria_scores={},
-            passed=True
-        )
+        raise QAFailure(f"Content QA API call failed: {e}") from e

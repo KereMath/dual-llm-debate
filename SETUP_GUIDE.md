@@ -57,8 +57,9 @@ TAVILY_API_KEY=tvly-xxxxx...  # Opsiyonel (V2 mode için)
 ### 4. Test Et
 
 ```bash
-# Hızlı test (offline mode)
-python test_simple.py
+# Birim testleri (API anahtarı gerektirmez)
+pip install pytest
+pytest tests/
 ```
 
 Eğer hata almazsan ✅ kurulum tamam!
@@ -224,13 +225,13 @@ docker-compose down
 
 ## 🧪 Test Senaryoları
 
-### Test 1: Offline Mode (Hızlı)
+### Test 1: Birim Testleri (API anahtarı gerektirmez)
 
 ```bash
-python test_simple.py
+pytest tests/
 ```
 
-Beklenen süre: ~2 dakika
+Beklenen süre: ~1 saniye
 
 ### Test 2: Internet Mode (Tavily)
 
@@ -316,7 +317,7 @@ from src import run_research
 - [ ] Dependencies yüklendi (`pip install -r requirements.txt`)
 - [ ] `.env` dosyası oluşturuldu
 - [ ] API key'ler yapılandırıldı
-- [ ] `test_simple.py` başarıyla çalıştı
+- [ ] `pytest tests/` başarıyla çalıştı
 - [ ] Streamlit UI açılıyor
 
 Hepsi ✅ ise **SİSTEM HAZIR!** 🎉

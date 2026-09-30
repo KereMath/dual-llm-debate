@@ -1,7 +1,7 @@
 # Core Dependencies
-python-dotenv==1.0.0
-pydantic==2.5.3
-pydantic-settings==2.1.0
+python-dotenv>=1.0.0
+pydantic>=2.9,<3
+pydantic-settings>=2.2,<3
 
 # LLM APIs
 anthropic==0.75.0

@@ -74,8 +74,12 @@ with st.sidebar:
     ) / 100.0
 
     st.markdown("**PDF Kalite**")
-    st.info(f"QA Auto-Approval: Açık (Threshold: {config.QA_THRESHOLD})")
-    st.caption("PDF her zaman oluşturulacak, QA hatası engel olmayacak")
+    st.info(f"QA eşiği: {config.QA_THRESHOLD}/100")
+    st.caption(
+        "Puan eşiğin altındaysa PDF yeniden üretilir. "
+        "QA çalıştırılamazsa (API/parse hatası) PDF onaysız olarak işaretlenir - "
+        "otomatik onay YOK."
+    )
 
     st.markdown("---")
 
@@ -195,8 +199,11 @@ if research_button:
             st.metric("Mutabakat", f"{final_state.similarity_score:.1%}")
 
         with metric_cols[2]:
-            color = "🟢" if final_state.average_qa_score >= config.QA_THRESHOLD else "🟡"
-            st.metric("QA Puanı", f"{color} {final_state.average_qa_score:.1f}/100")
+            if final_state.qa_failed:
+                st.metric("QA Puanı", "🔴 Başarısız")
+            else:
+                color = "🟢" if final_state.average_qa_score >= config.QA_THRESHOLD else "🟡"
+                st.metric("QA Puanı", f"{color} {final_state.average_qa_score:.1f}/100")
 
         with metric_cols[3]:
             st.metric("LaTeX Retry", final_state.latex_retry_count)
@@ -217,8 +224,17 @@ if research_button:
                 st.markdown(f"**Dosya:** `{Path(final_state.pdf_path).name}`")
                 if final_state.pdf_approved:
                     st.success("✅ PDF kalite kontrolünden geçti")
+                elif final_state.qa_failed:
+                    st.error(
+                        "❌ Kalite kontrol ÇALIŞTIRILAMADI (API/parse hatası) - "
+                        "PDF onaysız. Detaylar hata logunda."
+                    )
                 else:
-                    st.info("ℹ️ PDF oluşturuldu (QA: {:.1f}/100)".format(final_state.average_qa_score))
+                    st.warning(
+                        "⚠️ PDF kalite eşiğini geçemedi (QA: {:.1f}/100 < {}) - onaysız.".format(
+                            final_state.average_qa_score, config.QA_THRESHOLD
+                        )
+                    )
 
             with col_download:
                 st.download_button(
@@ -276,7 +292,10 @@ if research_button:
                 for idx, error in enumerate(final_state.errors, 1):
                     st.warning(f"{idx}. {error}")
 
-        st.success("🎉 Araştırma başarıyla tamamlandı!")
+        if final_state.qa_failed:
+            st.warning("⚠️ Araştırma tamamlandı ama kalite kontrol yapılamadı - PDF onaysız.")
+        else:
+            st.success("🎉 Araştırma başarıyla tamamlandı!")
 
     except Exception as e:
         st.error(f"❌ Hata oluştu: {str(e)}")

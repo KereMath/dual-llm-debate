@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════════════
 
 def strip_citations(latex: str) -> str:
-    """
+    r"""
     Remove all citation commands and reference numbers from LaTeX
 
     Removes:

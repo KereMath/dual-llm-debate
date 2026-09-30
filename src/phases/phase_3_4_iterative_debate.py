@@ -1,8 +1,9 @@
 """
-Phase 3+4 Fusion: Iterative Comparative Debate (SOTA)
+Phase 3+4 Fusion: Iterative Comparative Debate
 
-Replaces old phase_3_cross_examination.py + phase_4_convergence.py
-with true iterative debate where agents see each other's revisions
+True iterative debate where agents see each other's revisions,
+lock high-confidence agreements round by round, and converge
+on a 4-metric consensus check.
 """
 
 import json
@@ -107,7 +108,7 @@ def build_handshake_prompt(
     locked_agreements: List[LockedClaim],
     disputed_points: List[str],
     round_num: int,
-    devil_advocate_instruction: str
+    collaborative_instruction: str
 ) -> str:
     """Build comparison handshake prompt for agent"""
 
@@ -123,7 +124,7 @@ def build_handshake_prompt(
         own_previous=own_previous,
         other_previous=other_previous,
         disputed_points=format_disputed_points(disputed_points),
-        devil_advocate_instruction=devil_advocate_instruction
+        collaborative_instruction=collaborative_instruction
     )
 
 
@@ -474,7 +475,7 @@ def run_iterative_debate_round(
         gemini_prev = state.get_latest_gemini_answer()
         claude_prev = state.get_latest_claude_answer()
 
-    # Get collaborative instruction (SOTA: no devil's advocate, just collaborative mode)
+    # Get collaborative instruction (round 1 neutral, round 2+ convergence mode)
     locked_count = len(state.locked_agreements)
     collaborative_instruction = get_collaborative_instruction(round_num, locked_count)
 
@@ -491,7 +492,7 @@ def run_iterative_debate_round(
         locked_agreements=state.locked_agreements,
         disputed_points=state.current_disputed_points,
         round_num=round_num,
-        devil_advocate_instruction=collaborative_instruction
+        collaborative_instruction=collaborative_instruction
     )
 
     claude_prompt = build_handshake_prompt(
@@ -503,7 +504,7 @@ def run_iterative_debate_round(
         locked_agreements=state.locked_agreements,
         disputed_points=state.current_disputed_points,
         round_num=round_num,
-        devil_advocate_instruction=collaborative_instruction
+        collaborative_instruction=collaborative_instruction
     )
 
     # Call both agents in parallel using threading
