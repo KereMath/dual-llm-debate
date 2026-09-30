@@ -44,6 +44,28 @@ logger = logging.getLogger(__name__)
 # the inventory could not be built.
 # ═══════════════════════════════════════════════════════════
 
+def _renumber_claims(claims: List[InventoryClaim], start_id: int,
+                     existing_statements: Optional[List[str]] = None) -> List[InventoryClaim]:
+    """Assign sequential ids SERVER-SIDE — model-provided ids are never trusted.
+
+    Models sometimes restart numbering at 1 (colliding with existing ids)
+    or repeat an id within one response; either would silently lose or
+    duplicate claims if we kept their ids. Statements that duplicate an
+    existing inventory entry (case-insensitive) are skipped, empty ones
+    dropped; every other claim survives with a fresh id.
+    """
+    seen = {s.strip().lower() for s in (existing_statements or [])}
+    result = []
+    for c in claims:
+        text = c.statement.strip()
+        key = text.lower()
+        if not text or key in seen:
+            continue
+        seen.add(key)
+        result.append(InventoryClaim(claim_id=start_id + len(result), statement=text))
+    return result
+
+
 def ensure_claim_inventory(state: DebateState) -> DebateState:
     """Extract the canonical claim inventory once, before round 1.
 
@@ -67,13 +89,9 @@ def ensure_claim_inventory(state: DebateState) -> DebateState:
             temperature=0.0,
         )
         inventory = ClaimInventoryOutput.model_validate(data).claims
-        # Drop empty statements and duplicate ids (keep first occurrence)
-        seen: set = set()
-        cleaned = []
-        for c in inventory:
-            if c.statement.strip() and c.claim_id not in seen:
-                seen.add(c.claim_id)
-                cleaned.append(c)
+        # Renumber 1..N server-side: duplicate model ids must not silently
+        # drop a claim, and empty/duplicate statements are removed
+        cleaned = _renumber_claims(inventory, start_id=1)
         state.claim_inventory = cleaned
         logger.info(f"  ✅ Claim inventory: {len(cleaned)} canonical claims")
     except Exception as e:
@@ -112,9 +130,13 @@ def extend_claim_inventory(state: DebateState) -> DebateState:
             temperature=0.0,
         )
         new_claims = ClaimInventoryOutput.model_validate(data).claims
-        existing_ids = {c.claim_id for c in state.claim_inventory}
-        added = [c for c in new_claims
-                 if c.statement.strip() and c.claim_id not in existing_ids]
+        # Server-side ids: a model restarting numbering at 1 must not get
+        # its genuinely-new claims silently dropped as "collisions", and a
+        # repeated id must not put two different claims under one number.
+        # Statements already in the inventory are skipped instead.
+        added = _renumber_claims(
+            new_claims, next_id,
+            existing_statements=[c.statement for c in state.claim_inventory])
         if added:
             state.claim_inventory.extend(added)
             logger.info(f"  ➕ Inventory extended with {len(added)} new claim(s) "

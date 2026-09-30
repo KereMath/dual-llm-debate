@@ -53,16 +53,19 @@ class TestEnsureClaimInventory:
         assert state.claim_inventory == []
         assert any("inventory" in e.lower() for e in state.errors)
 
-    def test_duplicate_ids_and_empty_statements_dropped(self, monkeypatch):
+    def test_ids_are_assigned_server_side(self, monkeypatch):
+        # A duplicate model id must NOT silently drop the second claim -
+        # ids are renumbered 1..N server-side; empty statements are dropped
         payload = {"claims": [
             {"claim_id": 1, "statement": "A"},
-            {"claim_id": 1, "statement": "duplicate id"},
+            {"claim_id": 1, "statement": "B kept despite duplicate model id"},
             {"claim_id": 2, "statement": "   "},
-            {"claim_id": 3, "statement": "C"},
+            {"claim_id": 9, "statement": "C"},
         ]}
         monkeypatch.setattr(debate, "call_claude_structured", lambda **kw: payload)
         state = debate.ensure_claim_inventory(make_state())
-        assert [(c.claim_id, c.statement) for c in state.claim_inventory] == [(1, "A"), (3, "C")]
+        assert [(c.claim_id, c.statement) for c in state.claim_inventory] == [
+            (1, "A"), (2, "B kept despite duplicate model id"), (3, "C")]
 
     def test_existing_inventory_not_reextracted(self, monkeypatch):
         def boom(**kw):
@@ -133,15 +136,43 @@ class TestExtendClaimInventory:
         assert "Existing claim" in captured["prompt"]       # existing list shown
         assert captured["temperature"] == 0.0
 
-    def test_colliding_ids_are_dropped(self, monkeypatch):
+    def test_model_restarting_numbering_at_1_loses_nothing(self, monkeypatch):
+        # Models sometimes ignore next_id and number from 1; those claims
+        # used to be silently dropped as "collisions" while the log said
+        # "no new claims". Server-side renumbering keeps them all.
         monkeypatch.setattr(debate, "call_claude_structured",
                             lambda **kw: {"claims": [
-                                {"claim_id": 1, "statement": "collides with existing"},
-                                {"claim_id": 5, "statement": "kept"},
+                                {"claim_id": 1, "statement": "New claim X"},
+                                {"claim_id": 2, "statement": "New claim Y"},
                             ]})
         state = debate.extend_claim_inventory(self.base_state())
-        assert [c.claim_id for c in state.claim_inventory] == [1, 5]
-        assert state.claim_inventory[0].statement == "Existing claim"
+        assert [(c.claim_id, c.statement) for c in state.claim_inventory] == [
+            (1, "Existing claim"), (2, "New claim X"), (3, "New claim Y")]
+
+    def test_repeated_new_id_gets_distinct_numbers(self, monkeypatch):
+        # Two different claims under the same model id must not share a
+        # number in the inventory (locks could record the wrong text)
+        monkeypatch.setattr(debate, "call_claude_structured",
+                            lambda **kw: {"claims": [
+                                {"claim_id": 4, "statement": "First new"},
+                                {"claim_id": 4, "statement": "Second new"},
+                            ]})
+        state = debate.extend_claim_inventory(self.base_state())
+        ids = [c.claim_id for c in state.claim_inventory]
+        assert ids == [1, 2, 3]
+        assert len(ids) == len(set(ids))
+
+    def test_restated_existing_claim_not_duplicated(self, monkeypatch):
+        # A "new" claim whose text already exists in the inventory is
+        # skipped (same claim under two ids would split the agents' votes)
+        monkeypatch.setattr(debate, "call_claude_structured",
+                            lambda **kw: {"claims": [
+                                {"claim_id": 7, "statement": "existing CLAIM"},
+                                {"claim_id": 8, "statement": "Actually new"},
+                            ]})
+        state = debate.extend_claim_inventory(self.base_state())
+        assert [c.statement for c in state.claim_inventory] == [
+            "Existing claim", "Actually new"]
 
     def test_failure_keeps_inventory_unchanged(self, monkeypatch):
         def boom(**kw):
