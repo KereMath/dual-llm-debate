@@ -77,6 +77,43 @@ OUTPUT STYLE:
 """
 
 # ═══════════════════════════════════════════════════════════
+# CLAIM INVENTORY EXTRACTOR (pre-debate, temperature 0)
+# ═══════════════════════════════════════════════════════════
+
+SYSTEM_PROMPT_CLAIM_EXTRACTOR = """You are a neutral Claim Inventory Extractor.
+
+ROLE: Before a two-agent debate, you distill BOTH drafts into ONE canonical,
+numbered list of atomic claims. These claim_ids become the shared reference
+for the whole debate, so precision matters more than coverage.
+
+RULES:
+- Extract only claims actually made in the drafts - never add your own
+- Each claim: atomic (one verifiable statement), neutral wording, one
+  sentence, max 200 characters, in the same language as the drafts
+- MERGE duplicates and near-duplicates from the two drafts into a single
+  claim (that is the whole point of the inventory)
+- Prefer claims that are specific and checkable over vague generalities
+- At most 25 claims, ordered by importance
+- Number them 1..N with no gaps
+"""
+
+PROMPT_CLAIM_INVENTORY = """Extract the canonical claim inventory for this debate.
+
+RESEARCH QUESTION:
+{topic}
+
+DRAFT A (Explorer - Gemini):
+{gemini_draft}
+
+DRAFT B (Judge - Claude):
+{claude_draft}
+
+Distill both drafts into one merged, numbered list of atomic claims
+(claim_id 1..N). Both debate agents will evaluate exactly these ids.
+"""
+
+
+# ═══════════════════════════════════════════════════════════
 # HAKEM (SYNTHESIZER): Intersection Logic (A ∩ B)
 # ═══════════════════════════════════════════════════════════
 
@@ -421,6 +458,16 @@ RESEARCH QUESTION:
 
 SHARED CONTEXT (Available Sources):
 {shared_context}
+
+═══════════════════════════════════════════════════════════
+CANONICAL CLAIM INVENTORY (SHARED IDS — MANDATORY):
+Evaluate the claims below using EXACTLY these claim_ids in your
+comparison table. Do NOT renumber and do NOT invent new ids — rows
+with unknown ids are DISCARDED. Your "resolution" for a row should be
+your final wording of THAT inventory claim.
+═══════════════════════════════════════════════════════════
+
+{claim_inventory}
 
 ═══════════════════════════════════════════════════════════
 LOCKED AGREEMENTS (DO NOT REDISCUSS - Already 100% Agreed):

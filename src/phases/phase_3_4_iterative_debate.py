@@ -12,7 +12,7 @@ from typing import Tuple, List, Optional
 
 from src.schemas import (
     DebateState, DebateRound, ComparisonClaim, LockedClaim,
-    DebateComparisonOutput
+    DebateComparisonOutput, ClaimInventoryOutput, InventoryClaim
 )
 from src.api_clients import (
     call_claude_api, call_gemini_api,
@@ -20,8 +20,10 @@ from src.api_clients import (
 )
 from src.prompts import (
     PROMPT_COMPARISON_HANDSHAKE,
+    PROMPT_CLAIM_INVENTORY,
     SYSTEM_PROMPT_GEMINI_EXPLORER,
     SYSTEM_PROMPT_CLAUDE_JUDGE,
+    SYSTEM_PROMPT_CLAIM_EXTRACTOR,
     report_language_instruction
 )
 
@@ -31,6 +33,80 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════════════
 # HELPER FUNCTIONS
 # ═══════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════
+# CANONICAL CLAIM INVENTORY
+# One cheap extraction call (Claude, temperature 0) turns both drafts into
+# a single numbered claim list BEFORE the debate. Both agents evaluate the
+# SAME ids, which eliminates the claim-alignment problem at its root; the
+# textual similarity guard below remains only for the fallback case where
+# the inventory could not be built.
+# ═══════════════════════════════════════════════════════════
+
+def ensure_claim_inventory(state: DebateState) -> DebateState:
+    """Extract the canonical claim inventory once, before round 1.
+
+    On any failure the debate proceeds WITHOUT an inventory (legacy
+    behavior: per-agent numbering + resolution-similarity guard).
+    """
+    if state.claim_inventory:
+        return state
+
+    logger.info("  Extracting canonical claim inventory (Claude, temp 0)...")
+    try:
+        data = call_claude_structured(
+            prompt=PROMPT_CLAIM_INVENTORY.format(
+                topic=state.topic,
+                gemini_draft=state.gemini_draft,
+                claude_draft=state.claude_draft,
+            ),
+            system_prompt=SYSTEM_PROMPT_CLAIM_EXTRACTOR,
+            schema=ClaimInventoryOutput.model_json_schema(),
+            tool_name="submit_claim_inventory",
+            temperature=0.0,
+        )
+        inventory = ClaimInventoryOutput.model_validate(data).claims
+        # Drop empty statements and duplicate ids (keep first occurrence)
+        seen: set = set()
+        cleaned = []
+        for c in inventory:
+            if c.statement.strip() and c.claim_id not in seen:
+                seen.add(c.claim_id)
+                cleaned.append(c)
+        state.claim_inventory = cleaned
+        logger.info(f"  ✅ Claim inventory: {len(cleaned)} canonical claims")
+    except Exception as e:
+        logger.warning(f"  ⚠️ Claim inventory extraction failed ({e}) - "
+                       f"debate falls back to per-agent numbering + similarity guard")
+        state.add_error(f"Claim inventory extraction failed: {e}")
+
+    return state
+
+
+def format_claim_inventory(inventory: List[InventoryClaim]) -> str:
+    """Render the inventory for the handshake prompt"""
+    if not inventory:
+        return ("(No shared inventory for this run - number your claims "
+                "consistently and make every resolution text precise.)")
+    return "\n".join(f"{c.claim_id}. {c.statement}" for c in inventory)
+
+
+def filter_to_inventory_ids(table: List[dict], valid_ids: set, agent_name: str) -> List[dict]:
+    """Drop comparison rows whose claim_id is not in the canonical inventory"""
+    if not valid_ids or not table:
+        return table
+
+    kept = [c for c in table if c.get("claim_id") in valid_ids]
+    invented = len(table) - len(kept)
+    if invented:
+        logger.warning(f"  ⚠️ {agent_name}: discarded {invented} row(s) with "
+                       f"non-inventory claim_ids")
+    missing = valid_ids - {c.get("claim_id") for c in kept}
+    if missing:
+        logger.warning(f"  ⚠️ {agent_name}: left {len(missing)} inventory claim(s) "
+                       f"unevaluated: {sorted(missing)[:10]}")
+    return kept
+
 
 # Minimum textual similarity for two resolutions to count as the SAME claim.
 # Conservative direction: a false negative just skips a lock ("when in doubt,
@@ -149,7 +225,8 @@ def build_handshake_prompt(
     disputed_points: List[str],
     round_num: int,
     collaborative_instruction: str,
-    report_language: str = "auto"
+    report_language: str = "auto",
+    claim_inventory: Optional[List[InventoryClaim]] = None
 ) -> str:
     """Build comparison handshake prompt for agent"""
 
@@ -160,6 +237,7 @@ def build_handshake_prompt(
         agent_name=agent_name,
         topic=topic,
         language_instruction=report_language_instruction(report_language),
+        claim_inventory=format_claim_inventory(claim_inventory or []),
         shared_context=shared_context[:5000],  # Truncate if too long
         locked_agreements=format_locked_agreements(locked_agreements),
         prev_round=prev_round,
@@ -395,7 +473,8 @@ def calculate_weighted_consensus(comparison_table: List[dict]) -> float:
 
 def calculate_symmetric_consensus(
     gemini_table: List[dict],
-    claude_table: List[dict]
+    claude_table: List[dict],
+    inventory_ids: Optional[set] = None
 ) -> float:
     """
     Calculate symmetric consensus - both agents see same score
@@ -420,11 +499,13 @@ def calculate_symmetric_consensus(
         if not c_claim:
             continue  # Skip if not in both tables
 
-        # Skip pairs whose resolution texts clearly describe different
-        # claims: the agents number their tables independently, so a
-        # matching claim_id alone does NOT guarantee the same claim
-        if not resolutions_match(g_claim.get("resolution"), c_claim.get("resolution")):
-            continue
+        # With a canonical inventory, a shared id IS the same claim by
+        # construction. Without one (fallback), agents numbered their
+        # tables independently, so guard against coincidental id matches
+        # pairing unrelated claims.
+        if not (inventory_ids and claim_id in inventory_ids):
+            if not resolutions_match(g_claim.get("resolution"), c_claim.get("resolution")):
+                continue
 
         # Both agents evaluated this claim — use each agent's OWN
         # confidence ("your_confidence" in each one's table)
@@ -455,7 +536,8 @@ def calculate_symmetric_consensus(
 def identify_lockable_claims(
     gemini_table: List[dict],
     claude_table: List[dict],
-    round_num: int
+    round_num: int,
+    inventory_map: Optional[dict] = None
 ) -> List[LockedClaim]:
     """
     Identify claims that can be locked (both agents agree with high confidence)
@@ -499,23 +581,26 @@ def identify_lockable_claims(
             gemini_conf >= threshold and
             claude_conf >= threshold):
 
-            # A lock is only useful with actual claim text; take either
-            # agent's resolution, whichever is non-empty
-            statement = (g_claim.get("resolution") or c_claim.get("resolution") or "").strip()
-            if not statement:
-                logger.warning(f"    ⚠️ Claim {claim_id} agreed but has no resolution text - not locked")
-                continue
+            if inventory_map and claim_id in inventory_map:
+                # Canonical inventory: the shared id IS the same claim by
+                # construction, and the inventory text is the single source
+                # of truth for what got locked
+                statement = inventory_map[claim_id].strip()
+            else:
+                # Fallback (no inventory): take either agent's resolution and
+                # guard against coincidental id matches pairing unrelated claims
+                statement = (g_claim.get("resolution") or c_claim.get("resolution") or "").strip()
+                if not statement:
+                    logger.warning(f"    ⚠️ Claim {claim_id} agreed but has no resolution text - not locked")
+                    continue
 
-            # Agents number claims independently — a matching claim_id can
-            # pair two UNRELATED claims. Never lock when the two resolution
-            # texts clearly describe different things.
-            if not resolutions_match(g_claim.get("resolution"), c_claim.get("resolution")):
-                logger.warning(
-                    f"    ⚠️ Claim {claim_id} agreed but resolutions describe different claims "
-                    f"- not locked (gemini: {str(g_claim.get('resolution'))[:60]!r} / "
-                    f"claude: {str(c_claim.get('resolution'))[:60]!r})"
-                )
-                continue
+                if not resolutions_match(g_claim.get("resolution"), c_claim.get("resolution")):
+                    logger.warning(
+                        f"    ⚠️ Claim {claim_id} agreed but resolutions describe different claims "
+                        f"- not locked (gemini: {str(g_claim.get('resolution'))[:60]!r} / "
+                        f"claude: {str(c_claim.get('resolution'))[:60]!r})"
+                    )
+                    continue
 
             locked = LockedClaim(
                 statement=statement,
@@ -579,7 +664,8 @@ def run_iterative_debate_round(
         disputed_points=state.current_disputed_points,
         round_num=round_num,
         collaborative_instruction=collaborative_instruction,
-        report_language=state.report_language
+        report_language=state.report_language,
+        claim_inventory=state.claim_inventory
     )
 
     claude_prompt = build_handshake_prompt(
@@ -592,7 +678,8 @@ def run_iterative_debate_round(
         disputed_points=state.current_disputed_points,
         round_num=round_num,
         collaborative_instruction=collaborative_instruction,
-        report_language=state.report_language
+        report_language=state.report_language,
+        claim_inventory=state.claim_inventory
     )
 
     # Call both agents in parallel using threading.
@@ -647,6 +734,16 @@ def run_iterative_debate_round(
 
     logger.info("  → Both agents completed")
 
+    # With a canonical inventory, discard rows whose ids are not in it
+    # (agents were told invented ids are dropped) and log unevaluated ids
+    inventory_map = {c.claim_id: c.statement for c in state.claim_inventory}
+    if inventory_map:
+        valid_ids = set(inventory_map)
+        gemini_data["comparison_table"] = filter_to_inventory_ids(
+            gemini_data.get("comparison_table") or [], valid_ids, "Gemini")
+        claude_data["comparison_table"] = filter_to_inventory_ids(
+            claude_data.get("comparison_table") or [], valid_ids, "Claude")
+
     # ═══════════════════════════════════════════════════════════
     # HYBRID CONSENSUS CALCULATION (4 METRICS)
     # ═══════════════════════════════════════════════════════════
@@ -692,7 +789,9 @@ def run_iterative_debate_round(
 
         logger.debug(f"  Claim matching: Gemini {len(gemini_ids)} claims, Claude {len(claude_ids)} claims, Intersection {len(intersection_ids)} claims")
 
-        symmetric_consensus = calculate_symmetric_consensus(gemini_table, claude_table)
+        symmetric_consensus = calculate_symmetric_consensus(
+            gemini_table, claude_table,
+            inventory_ids=set(inventory_map) if inventory_map else None)
         logger.debug(f"  Symmetric consensus calculated from intersection")
     else:
         # Fallback: average of individual scores if JSON parse failed
@@ -715,10 +814,14 @@ def run_iterative_debate_round(
     new_locked = identify_lockable_claims(
         gemini_data.get("comparison_table", []),
         claude_data.get("comparison_table", []),
-        round_num
+        round_num,
+        inventory_map=inventory_map or None
     )
 
-    # Update state with new locks
+    # Update state with new locks, skipping claims already locked in an
+    # earlier round (agents may re-agree on the same canonical statement)
+    already_locked = {c.statement for c in state.locked_agreements}
+    new_locked = [c for c in new_locked if c.statement not in already_locked]
     state.locked_agreements.extend(new_locked)
 
     logger.info(f"  New locked claims: {len(new_locked)}")
@@ -831,6 +934,10 @@ def run_debate_loop(state: DebateState) -> DebateState:
 
     Replacement for old phase_3 + phase_4 loop
     """
+
+    # Build the canonical claim inventory once, before round 1, so both
+    # agents debate the SAME numbered claims
+    state = ensure_claim_inventory(state)
 
     while state.iteration_counter < state.max_rounds:
         round_num = state.iteration_counter + 1

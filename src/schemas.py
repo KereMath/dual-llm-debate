@@ -163,6 +163,12 @@ class DebateState(BaseModel):
     # ITERATIVE DEBATE TRACKING (SOTA Enhancement)
     # ───────────────────────────────────────────────────────
 
+    claim_inventory: List["InventoryClaim"] = Field(
+        default_factory=list,
+        description="Canonical numbered claim list extracted from both drafts "
+                    "before the debate; both agents evaluate THESE ids"
+    )
+
     debate_rounds: List["DebateRound"] = Field(
         default_factory=list,
         description="History of all debate rounds"
@@ -301,6 +307,22 @@ class LockedClaim(BaseModel):
     source_claude: Optional[str] = Field(default=None)
     locked_round: int = Field(description="Round when this was locked")
     confidence_avg: float = Field(ge=0, le=1, description="Average confidence when locked")
+
+
+# ═══════════════════════════════════════════════════════════
+# CANONICAL CLAIM INVENTORY (extracted once before the debate
+# so both agents share the same claim ids)
+# ═══════════════════════════════════════════════════════════
+
+class InventoryClaim(BaseModel):
+    """One canonical claim both agents will evaluate under this id"""
+    claim_id: int = Field(description="Canonical id, 1..N")
+    statement: str = Field(description="Neutral one-sentence statement of the claim (<=200 chars)")
+
+
+class ClaimInventoryOutput(BaseModel):
+    """Structured output of the pre-debate claim extraction call"""
+    claims: List[InventoryClaim] = Field(default_factory=list)
 
 
 # ═══════════════════════════════════════════════════════════
