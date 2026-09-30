@@ -98,7 +98,11 @@ def approval_decision_node(state: DebateState) -> DebateState:
 
     threshold = config.QA_THRESHOLD
 
-    if state.qa_failed:
+    if state.synthesis_failed:
+        state.pdf_approved = False
+        logger.error("❌ PDF NOT APPROVED - referee synthesis failed; the report "
+                     "is a degraded locked-claims fallback")
+    elif state.qa_failed:
         state.pdf_approved = False
         logger.error("❌ PDF NOT APPROVED - QA could not be performed (see error log)")
     elif state.average_qa_score >= threshold:

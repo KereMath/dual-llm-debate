@@ -82,6 +82,13 @@ class TestApprovalDecision:
         state = qa.approval_decision_node(state)
         assert state.pdf_approved is False
 
+    def test_synthesis_failure_never_approves(self):
+        # A degraded locked-claims-only report must never end "approved",
+        # even if QA scores the compiled PDF highly
+        state = make_state(synthesis_failed=True, average_qa_score=99.0)
+        state = qa.approval_decision_node(state)
+        assert state.pdf_approved is False
+
     def test_score_above_threshold_approves(self):
         state = make_state(average_qa_score=config.QA_THRESHOLD + 1)
         state = qa.approval_decision_node(state)
@@ -100,6 +107,11 @@ class TestRegenerationDecision:
     def test_qa_failure_ends_without_regeneration(self):
         # Regeneration cannot fix a QA infrastructure failure
         state = make_state(pdf_approved=False, qa_failed=True, pdf_regeneration_count=0)
+        assert should_regenerate_pdf(state) == "end"
+
+    def test_synthesis_failure_ends_without_regeneration(self):
+        # Regenerating LaTeX cannot fix a degraded consensus report
+        state = make_state(pdf_approved=False, synthesis_failed=True, pdf_regeneration_count=0)
         assert should_regenerate_pdf(state) == "end"
 
     def test_low_score_triggers_regeneration(self):

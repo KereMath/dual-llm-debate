@@ -32,6 +32,39 @@ logger = logging.getLogger(__name__)
 # HELPER FUNCTIONS
 # ═══════════════════════════════════════════════════════════
 
+# Minimum textual similarity for two resolutions to count as the SAME claim.
+# Conservative direction: a false negative just skips a lock ("when in doubt,
+# exclude"); a false positive would lock two unrelated claims together.
+RESOLUTION_MATCH_RATIO = 0.45     # difflib character-level ratio
+RESOLUTION_MATCH_JACCARD = 0.30   # word-set overlap (handles reordered phrasing)
+
+
+def resolutions_match(res_a: Optional[str], res_b: Optional[str]) -> bool:
+    """
+    Do two resolution texts plausibly describe the same claim?
+
+    The agents build their comparison tables independently, so claim_id
+    alignment is not guaranteed; this is the guard that keeps a matching
+    ID from pairing e.g. "water boils at 100C" with "the Eiffel Tower is
+    in Paris". If either side has no resolution text (legacy/fallback
+    tables), there is nothing to compare and the pair is allowed through.
+    """
+    a = (res_a or "").strip().lower()
+    b = (res_b or "").strip().lower()
+    if not a or not b:
+        return True
+
+    import difflib
+    if difflib.SequenceMatcher(None, a, b).ratio() >= RESOLUTION_MATCH_RATIO:
+        return True
+
+    words_a, words_b = set(a.split()), set(b.split())
+    if not words_a or not words_b:
+        return True
+    jaccard = len(words_a & words_b) / len(words_a | words_b)
+    return jaccard >= RESOLUTION_MATCH_JACCARD
+
+
 def get_progressive_confidence_threshold(round_num: int) -> float:
     """
     Progressive confidence threshold system (SOTA)
@@ -336,10 +369,13 @@ def calculate_weighted_consensus(comparison_table: List[dict]) -> float:
     agreed_weight = 0.0
 
     for claim in comparison_table:
-        # Average confidence as weight
-        conf_gemini = claim.get("your_confidence", 0.5)
-        conf_claude = claim.get("other_confidence", 0.5)
-        avg_conf = (conf_gemini + conf_claude) / 2
+        # This is a SINGLE agent's table: your_confidence is its own,
+        # other_confidence is its ESTIMATE of the other side. Averaging
+        # the two is intentional here — it's a per-agent perspective
+        # metric, unlike the cross-table symmetric/locking checks.
+        conf_own = claim.get("your_confidence", 0.5)
+        conf_other_est = claim.get("other_confidence", 0.5)
+        avg_conf = (conf_own + conf_other_est) / 2
 
         total_weight += 1.0
 
@@ -384,9 +420,16 @@ def calculate_symmetric_consensus(
         if not c_claim:
             continue  # Skip if not in both tables
 
-        # Both agents evaluated this claim
+        # Skip pairs whose resolution texts clearly describe different
+        # claims: the agents number their tables independently, so a
+        # matching claim_id alone does NOT guarantee the same claim
+        if not resolutions_match(g_claim.get("resolution"), c_claim.get("resolution")):
+            continue
+
+        # Both agents evaluated this claim — use each agent's OWN
+        # confidence ("your_confidence" in each one's table)
         g_conf = g_claim.get("your_confidence", 0.5)
-        c_conf = c_claim.get("other_confidence", 0.5)
+        c_conf = c_claim.get("your_confidence", 0.5)
         avg_conf = (g_conf + c_conf) / 2
 
         total_weight += 1.0
@@ -444,9 +487,12 @@ def identify_lockable_claims(
         if not c_claim:
             continue
 
-        # Check locking criteria with progressive threshold
+        # Check locking criteria with progressive threshold.
+        # Each agent's OWN confidence is read from its own table
+        # ("your_confidence"); other_confidence is only that agent's
+        # GUESS about the other side and must not gate a lock.
         gemini_conf = g_claim.get("your_confidence", 0)
-        claude_conf = c_claim.get("other_confidence", 0)
+        claude_conf = c_claim.get("your_confidence", 0)
 
         if (g_claim.get("status") == "agree" and
             c_claim.get("status") == "agree" and
@@ -458,6 +504,17 @@ def identify_lockable_claims(
             statement = (g_claim.get("resolution") or c_claim.get("resolution") or "").strip()
             if not statement:
                 logger.warning(f"    ⚠️ Claim {claim_id} agreed but has no resolution text - not locked")
+                continue
+
+            # Agents number claims independently — a matching claim_id can
+            # pair two UNRELATED claims. Never lock when the two resolution
+            # texts clearly describe different things.
+            if not resolutions_match(g_claim.get("resolution"), c_claim.get("resolution")):
+                logger.warning(
+                    f"    ⚠️ Claim {claim_id} agreed but resolutions describe different claims "
+                    f"- not locked (gemini: {str(g_claim.get('resolution'))[:60]!r} / "
+                    f"claude: {str(c_claim.get('resolution'))[:60]!r})"
+                )
                 continue
 
             locked = LockedClaim(

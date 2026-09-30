@@ -111,6 +111,8 @@ class TestSynthesisFailure:
         state = phase5.phase_5_intersection_synthesis(make_state())
 
         assert state.errors, "synthesis failure must be recorded in the error log"
+        # Explicit flag: the run must never end "approved" on a degraded report
+        assert state.synthesis_failed is True
         assert "api down" in state.consensus_report
         # Even the degraded report is built from the dual-verified claims
         assert "LOCKED_CLAIM_STATEMENT" in state.consensus_report

@@ -105,6 +105,9 @@ def phase_5_intersection_synthesis(state: DebateState) -> DebateState:
     except Exception as e:
         logger.error(f"Consensus extraction failed: {e}")
         state.add_error(f"Consensus error: {str(e)}")
+        # Explicit failure flag: the pipeline may still compile the degraded
+        # report below for inspection, but the run must never end "approved"
+        state.synthesis_failed = True
 
         # Fallback: report built from the locked claims (already dual-verified),
         # clearly marked as a degraded result

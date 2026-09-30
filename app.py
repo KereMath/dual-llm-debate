@@ -316,7 +316,13 @@ if "final_state" in st.session_state:
     st.markdown("## 📊 Results")
 
     # Verdict banner
-    if fs.qa_failed:
+    if fs.synthesis_failed:
+        st.error(
+            "❌ **Consensus synthesis failed** — the report is a degraded "
+            "locked-claims fallback and the PDF is explicitly NOT approved. "
+            "See the error log below."
+        )
+    elif fs.qa_failed:
         st.error(
             "❌ **Quality assurance could not be performed** (API/parse error). "
             "The PDF was generated but is explicitly NOT approved. See the error log below."

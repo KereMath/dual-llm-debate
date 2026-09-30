@@ -71,6 +71,11 @@ def should_regenerate_pdf(state: DebateState) -> Literal["pdf_revision", "end"]:
         logger.error("QA failed — ending WITHOUT approval (regeneration cannot fix a QA failure)")
         return "end"
 
+    if state.synthesis_failed:
+        logger.error("Synthesis failed — ending WITHOUT approval "
+                     "(regenerating LaTeX cannot fix a degraded consensus report)")
+        return "end"
+
     if state.pdf_regeneration_count < config.MAX_PDF_REGENERATIONS:
         return "pdf_revision"
 

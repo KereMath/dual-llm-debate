@@ -116,6 +116,12 @@ class DebateState(BaseModel):
         description="Final intersection report (A ∩ B)"
     )
 
+    synthesis_failed: bool = Field(
+        default=False,
+        description="Referee synthesis errored — consensus_report is a degraded "
+                    "locked-claims-only fallback and the PDF must NOT be approved"
+    )
+
     # ───────────────────────────────────────────────────────
     # PDF GENERATION PIPELINE
     # ───────────────────────────────────────────────────────
