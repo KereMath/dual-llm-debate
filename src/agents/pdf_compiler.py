@@ -79,11 +79,15 @@ def compile_latex_to_pdf(latex_code: str) -> Path:
         # Compile with pdflatex (twice for references)
         for run in range(2):
             try:
+                # pdflatex output is not guaranteed to match the console
+                # codepage (crashes reader threads on Windows without this)
                 result = subprocess.run(
                     ["pdflatex", "-interaction=nonstopmode", "document.tex"],
                     cwd=temp_path,
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     timeout=config.LATEX_TIMEOUT
                 )
 

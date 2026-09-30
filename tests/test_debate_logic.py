@@ -104,3 +104,18 @@ class TestClaimLocking:
     def test_no_lock_when_claim_missing_from_one_table(self):
         gemini, _ = self.make_tables(0.95, 0.95)
         assert identify_lockable_claims(gemini, [], round_num=1) == []
+
+    def test_no_lock_without_resolution_text(self):
+        # An agreement with empty resolution text is useless downstream
+        # (the synthesizer would receive an empty statement) - skip it
+        gemini, claude = self.make_tables(0.95, 0.95)
+        gemini[0]["resolution"] = "   "
+        assert identify_lockable_claims(gemini, claude, round_num=1) == []
+
+    def test_falls_back_to_other_agents_resolution(self):
+        gemini, claude = self.make_tables(0.95, 0.95)
+        del gemini[0]["resolution"]
+        claude[0]["resolution"] = "Claude's version of the claim"
+        locked = identify_lockable_claims(gemini, claude, round_num=1)
+        assert len(locked) == 1
+        assert locked[0].statement == "Claude's version of the claim"

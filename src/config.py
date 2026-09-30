@@ -31,7 +31,14 @@ class Config(BaseSettings):
     # ═══════════════════════════════════════════════════════════
 
     CLAUDE_MODEL: str = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-5-20250929")
-    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-1.5-pro-latest")
+    # Rolling alias survives Google's model retirements (gemini-1.5-pro and
+    # 2.5-flash-lite were both retired mid-2026); pin an exact id in .env if
+    # you need reproducibility. Free-tier daily quotas are per model (~20/day).
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
+    # Tried once (with its own retry budget) if the primary model keeps
+    # failing: 503 demand spikes or the per-model daily quota running out.
+    # Empty string disables.
+    GEMINI_FALLBACK_MODEL: str = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-flash-lite-latest")
 
     # Temperature settings
     GEMINI_TEMPERATURE: float = 0.7  # Higher creativity (Explorer)
@@ -40,7 +47,9 @@ class Config(BaseSettings):
 
     # Token limits
     CLAUDE_MAX_TOKENS: int = 4096
-    GEMINI_MAX_TOKENS: int = 8192
+    # Thinking-capable Gemini models spend output budget on internal thoughts;
+    # too small a limit truncates the visible answer mid-JSON
+    GEMINI_MAX_TOKENS: int = 16384
 
     # ═══════════════════════════════════════════════════════════
     # DEBATE CONFIGURATION

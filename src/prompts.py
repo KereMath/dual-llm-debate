@@ -259,11 +259,13 @@ EVALUATION CRITERIA (Her biri 0-100):
    - Gereksiz/fazla bilgi YOK (metodoloji kirliliği YOK)
    - Abstract ve conclusion orijinal soruya odaklı
 
-2. Citation Accuracy (25 puan):
-   - Tüm iddialarda atıf var
-   - Citation numaraları bibliography ile eşleşiyor
-   - URL'ler bibliography'de mevcut
-   - Sahipsiz citation YOK
+2. Source Fidelity (25 puan):
+   ⚠️ NOT: Final PDF'te citation/bibliography TASARIM GEREĞİ YOKTUR
+   (strip_citations ile bilinçli kaldırılır). Atıf eksikliğinden PUAN KIRMA.
+   Bunun yerine değerlendir:
+   - PDF içeriği konsensus raporuna sadık mı? (uydurma ekleme YOK)
+   - Konsensus raporundaki önemli bulgular PDF'te korunmuş mu?
+   - Rapor dışından desteksiz iddia eklenmemiş mi?
 
 3. Structural Integrity (20 puan):
    - Düzgün section hiyerarşisi
@@ -310,6 +312,9 @@ Senin görevin: Bu debate çıktısından TEMİZ akademik formatta bir konsensus
 CRITICAL: DO NOT describe the debate system or methodology in the output.
 CRITICAL: Output should be a DIRECT ANSWER to the research question in submittable form.
 CRITICAL: The dual-LLM process must be INVISIBLE - write as if a single expert answered.
+CRITICAL: DO NOT discuss what kind of sources were available. Never write things
+like "Internal Knowledge temelinde", "based on training data", "offline mode",
+"güncel bilgiler için çevrimiçi kaynaklara başvurun". Just answer the question.
 
 Araştırma Sorusu: {topic}
 
@@ -489,7 +494,7 @@ OUTPUT FORMAT - TWO PARTS (JSON + TEXT):
 
 ⚠️ CRITICAL JSON RULES TO PREVENT PARSE ERRORS:
 🚨 JSON MUST BE 100% VALID - System will FAIL if malformed!
-- Keep all JSON strings SHORT (max 50 chars per field)
+- Keep all JSON strings SHORT (max 50 chars per field; EXCEPTION: "resolution" may be up to 200 chars)
 - NO Turkish characters in JSON (English/ASCII only)
 - NO newlines inside JSON strings
 - Escape ALL quotes inside strings: " → \\"
@@ -506,6 +511,7 @@ PART 1: JSON METADATA (wrap in ```json code block)
   "comparison_table": [
     {{
       "claim_id": 1,
+      "resolution": "Short final statement of this claim",
       "status": "agree",
       "your_confidence": 0.9,
       "other_confidence": 0.85,
@@ -519,6 +525,10 @@ PART 1: JSON METADATA (wrap in ```json code block)
   "convergence_status": "continue"
 }}
 ```
+
+⚠️ "resolution" is REQUIRED for every claim: one short sentence (max 200 chars,
+ASCII only) stating the agreed/final version of the claim. Agreed claims are
+LOCKED using this text — an empty resolution means the agreement is LOST.
 
 PART 2: REVISED ANSWER (plain text, any length)
 

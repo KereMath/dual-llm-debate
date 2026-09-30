@@ -62,16 +62,23 @@ Cevabını yaz:"""
             return_exceptions=True
         )
 
-        # Handle errors
+        # A debate needs BOTH drafts. Continuing with an error placeholder
+        # would make the whole pipeline debate against an error message,
+        # so a failed draft fails the run explicitly.
+        failures = []
         if isinstance(gemini_draft, Exception):
             logger.error(f"Gemini draft failed: {gemini_draft}")
-            gemini_draft = "[ERROR] Gemini draft unavailable"
-            state.add_error(f"Gemini error: {str(gemini_draft)}")
-
+            state.add_error(f"Gemini draft error: {gemini_draft}")
+            failures.append(f"Gemini: {gemini_draft}")
         if isinstance(claude_draft, Exception):
             logger.error(f"Claude draft failed: {claude_draft}")
-            claude_draft = "[ERROR] Claude draft unavailable"
-            state.add_error(f"Claude error: {str(claude_draft)}")
+            state.add_error(f"Claude draft error: {claude_draft}")
+            failures.append(f"Claude: {claude_draft}")
+        if failures:
+            raise RuntimeError(
+                "Parallel drafting failed - cannot run a debate without both drafts. "
+                + " | ".join(failures)
+            )
 
         # Update state
         state.gemini_draft = gemini_draft

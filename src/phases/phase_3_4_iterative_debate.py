@@ -213,6 +213,20 @@ def parse_comparison_response(response_text: str) -> dict:
         # Log the problematic JSON to help debug
         logger.debug(f"Full response (first 2000 chars): {response_text[:2000]}")
 
+        # SALVAGE PASS: even when the overall JSON is broken (typically a
+        # truncated response), the comparison table's individual claim
+        # objects are flat and often intact - recover every complete one so
+        # coverage math and claim locking still work for this round.
+        salvaged_claims = []
+        for m in re.finditer(r'\{[^{}]*?"claim_id"\s*:\s*\d+[^{}]*?\}', response_text, re.DOTALL):
+            try:
+                fragment = m.group(0).replace(',}', '}').replace(',]', ']')
+                salvaged_claims.append(json.loads(fragment))
+            except (json.JSONDecodeError, ValueError):
+                continue
+        if salvaged_claims:
+            logger.warning(f"Salvaged {len(salvaged_claims)} complete claim objects from broken JSON")
+
         # Try to extract at least the revised_answer and consensus_score
         # using regex as fallback
         revised_answer = response_text
@@ -265,9 +279,9 @@ def parse_comparison_response(response_text: str) -> dict:
             logger.warning(f"Using fallback parsing: consensus={consensus_score:.1%} (extracted from text)")
 
         return {
-            "comparison_table": [],
+            "comparison_table": salvaged_claims,
             "consensus_score": consensus_score,
-            "total_claims": 0,
+            "total_claims": len(salvaged_claims),
             "agreed_claims": 0,
             "disputed_claims": 0,
             "new_agreements": [],
@@ -430,9 +444,15 @@ def identify_lockable_claims(
             gemini_conf >= threshold and
             claude_conf >= threshold):
 
-            # Lock this claim
+            # A lock is only useful with actual claim text; take either
+            # agent's resolution, whichever is non-empty
+            statement = (g_claim.get("resolution") or c_claim.get("resolution") or "").strip()
+            if not statement:
+                logger.warning(f"    ⚠️ Claim {claim_id} agreed but has no resolution text - not locked")
+                continue
+
             locked = LockedClaim(
-                statement=g_claim.get("resolution", ""),
+                statement=statement,
                 source_gemini=g_claim.get("your_source"),
                 source_claude=c_claim.get("your_source"),
                 locked_round=round_num,
@@ -665,6 +685,9 @@ def run_iterative_debate_round(
         claude_answer=claude_data.get("revised_answer", ""),
         comparison_table=[],  # Could store full table but it's large
         consensus_score=symmetric_consensus,  # Use symmetric as official metric
+        gemini_coverage=gemini_coverage,
+        claude_coverage=claude_coverage,
+        avg_coverage=avg_coverage,
         new_agreements=all_new_agreements,
         disputed_points=disputed,
         convergence_status="converged" if converged else "continue",

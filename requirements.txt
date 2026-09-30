@@ -10,18 +10,18 @@ google-genai>=1.57.0
 # Web Search
 tavily-python==0.3.3
 
-# LangGraph & LangChain
-langgraph==0.0.32
-langchain>=0.1.6
-langchain-core>=0.1.38
+# LangGraph (orchestration; langchain itself is not used)
+langgraph>=1.0,<2
 
 # PDF & LaTeX
-pypdf==4.0.1
-pdf2image==1.17.0
-pillow==10.2.0
+pypdf>=4.0
+pdf2image>=1.17
+pillow>=10.2
 
 # Streamlit UI
-streamlit==1.31.0
+streamlit>=1.37,<2
+pandas>=2.0
+altair>=5.0
 
 # Utilities
 aiohttp==3.9.3

@@ -82,3 +82,20 @@ Fallback answer.
         assert data["convergence_status"] == "continue"
         # Raw text preserved as the answer so the round is not lost
         assert "complete garbage" in data["revised_answer"]
+
+    def test_salvages_complete_claims_from_truncated_json(self):
+        # Truncated mid-table (e.g. output-token limit hit): the overall JSON
+        # is broken but the first claim objects are complete - they must be
+        # recovered so locking still works for the round
+        response = '''```json
+{
+  "comparison_table": [
+    {"claim_id": 1, "resolution": "First claim", "status": "agree", "your_confidence": 0.9, "other_confidence": 0.9},
+    {"claim_id": 2, "resolution": "Second claim", "status": "partial", "your_confidence": 0.7, "other_confidence": 0.6},
+    {"claim_id": 3, "resolution": "Truncated claim", "status": "agr'''
+        data = parse_comparison_response(response)
+        table = data["comparison_table"]
+        assert len(table) == 2
+        assert table[0]["claim_id"] == 1
+        assert table[0]["resolution"] == "First claim"
+        assert table[1]["status"] == "partial"

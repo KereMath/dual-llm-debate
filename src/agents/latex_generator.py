@@ -124,7 +124,9 @@ GEREKSINIMLER:
   \\usepackage[turkish]{{babel}}
 - Diğer paketler: geometry, hyperref, amsmath (NO natbib)
 - Title: "{state.topic}"
-- Author: "Research Consensus Machine (Dual-LLM System)"
+- NO author line: use \\author{{}} (empty) — the document must not reveal
+  how it was produced (QA rejects any dual-LLM/system mention as
+  methodology contamination)
 - Date: {datetime.now().strftime("%Y-%m-%d")}
 - Abstract, Introduction, Findings, Conclusion içermeli
 - NO References/Bibliography section

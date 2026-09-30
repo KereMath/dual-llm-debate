@@ -4,10 +4,10 @@ Complete cyclic state machine orchestration
 """
 
 import logging
-from typing import Literal
+from typing import Callable, Literal, Optional
 from datetime import datetime
 
-from langgraph.graph import StateGraph, END
+from langgraph.graph import StateGraph, END, START
 
 from .schemas import DebateState
 from .phases import (
@@ -170,7 +170,7 @@ def build_research_workflow() -> StateGraph:
     # Set entry point
     # ───────────────────────────────────────────────────────
 
-    workflow.set_entry_point("grounding")
+    workflow.add_edge(START, "grounding")
 
     return workflow.compile()
 
@@ -183,7 +183,8 @@ def run_research(
     topic: str,
     research_mode: str = "auto",
     max_rounds: int = None,
-    convergence_threshold: float = None
+    convergence_threshold: float = None,
+    on_phase: Optional[Callable[[str, DebateState], None]] = None
 ) -> DebateState:
     """
     Main entry point for research pipeline
@@ -193,6 +194,8 @@ def run_research(
         research_mode: "offline", "internet", or "auto"
         max_rounds: Max debate rounds (default: from config)
         convergence_threshold: Similarity threshold (default: from config)
+        on_phase: Optional callback fired after each graph node completes,
+            with (node_name, state_snapshot). Used by the UI for live progress.
 
     Returns:
         Final state with PDF path and statistics
@@ -226,8 +229,23 @@ def run_research(
 
     # Execute workflow
     try:
-        # LangGraph expects dict input, not Pydantic model
-        final_state_dict = workflow.invoke(initial_state.model_dump())
+        # Stream node-by-node so callers can track live progress.
+        # stream_mode="updates" yields {node_name: partial_state} per step;
+        # each node returns a full model_dump, so the last update is the
+        # complete final state.
+        final_state_dict = None
+        for update in workflow.stream(initial_state.model_dump(),
+                                      stream_mode="updates"):
+            for node_name, node_state in update.items():
+                final_state_dict = node_state
+                if on_phase and isinstance(node_state, dict):
+                    try:
+                        on_phase(node_name, DebateState(**node_state))
+                    except Exception as cb_err:
+                        logger.warning(f"on_phase callback error ({node_name}): {cb_err}")
+
+        if final_state_dict is None:
+            raise RuntimeError("Workflow produced no state updates")
 
         # Convert back to DebateState for return
         final_state = DebateState(**final_state_dict)
@@ -235,6 +253,10 @@ def run_research(
         # Finalize
         final_state.end_time = datetime.now()
         duration = final_state.get_duration()
+
+        # Persist locally so results survive UI refreshes/restarts
+        from .run_store import save_run
+        save_run(final_state)
 
         logger.info("="*60)
         logger.info(f"✅ Pipeline Complete in {duration:.1f}s")
@@ -285,3 +307,6 @@ def setup_logging(log_file: str = None):
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("anthropic").setLevel(logging.WARNING)
     logging.getLogger("google").setLevel(logging.WARNING)
+    # google-genai SDK logs an AFC banner on every call (we pass no tools,
+    # so it is pure noise); real failures surface as exceptions anyway
+    logging.getLogger("google_genai").setLevel(logging.ERROR)

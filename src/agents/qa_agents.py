@@ -68,6 +68,10 @@ def quality_assurance_node(state: DebateState) -> DebateState:
         logger.info(f"   Visual: {visual_score.score:.1f}/100")
         logger.info(f"   Content: {content_score.score:.1f}/100")
         logger.info(f"   Average: {state.average_qa_score:.1f}/100")
+        if visual_score.feedback:
+            logger.info(f"   Visual feedback: {visual_score.feedback[:300]}")
+        if content_score.feedback:
+            logger.info(f"   Content feedback: {content_score.feedback[:300]}")
 
         return state
 
@@ -317,7 +321,8 @@ EXTRACTED PDF TEXT (To Evaluate):
 
 Evaluate based on:
 1. Question Completeness (35 points) - Does it fully answer the research question? Submittable?
-2. Citation Accuracy (25 points)
+2. Source Fidelity (25 points) - Faithful to the consensus report, no fabricated additions?
+   (NOTE: citations/bibliography are stripped from the final PDF BY DESIGN - do not penalize their absence)
 3. Structural Integrity (20 points)
 4. Academic Standards (20 points) - No methodology contamination?
 

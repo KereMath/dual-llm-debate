@@ -34,15 +34,9 @@ else:
 # ═══════════════════════════════════════════════════════════
 
 @retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=2, max=10),
-    reraise=True
-)
-@retry(
     stop=stop_after_attempt(5),
     wait=wait_exponential(multiplier=2, min=4, max=60),
-    reraise=True,
-    retry=retry_if_exception_type((Exception,))
+    reraise=True
 )
 def call_claude_api(
     prompt: str,
@@ -96,51 +90,34 @@ def call_claude_api(
 # ═══════════════════════════════════════════════════════════
 
 @retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=2, max=10),
+    stop=stop_after_attempt(6),
+    wait=wait_exponential(multiplier=3, min=10, max=90),
     reraise=True
 )
-def call_gemini_api(
-    prompt: str,
-    system_prompt: str,
-    temperature: Optional[float] = None,
-    max_tokens: Optional[int] = None
-) -> str:
+def _generate_gemini_content(model: str, prompt: str, system_prompt: str,
+                             temp: float, tokens: int) -> str:
+    """Single-model Gemini call with retry/backoff.
+
+    Waits start at 10s and grow to 90s: free-tier 429s are per-minute rate
+    limits, so retrying faster than the window resets just burns the quota.
     """
-    Call Gemini API with retry logic (using new google.genai package)
 
-    Args:
-        prompt: User message
-        system_prompt: System instruction
-        temperature: Override default temperature
-        max_tokens: Override default max tokens
-
-    Returns:
-        Generated text
-
-    Raises:
-        Exception: If API call fails after retries
-    """
-    if not gemini_client:
-        raise ValueError("Google API key not configured")
-
-    temp = temperature if temperature is not None else config.GEMINI_TEMPERATURE
-    tokens = max_tokens if max_tokens is not None else config.GEMINI_MAX_TOKENS
-
-    logger.debug(f"Calling Gemini API (temp={temp}, max_tokens={tokens})")
+    logger.debug(f"Calling Gemini API (model={model}, temp={temp}, max_tokens={tokens})")
 
     try:
-        # Use new API with system instruction support
-        # Note: Gemini 2.5 Pro may use thinking tokens internally
-        # ✅ Google Search Grounding enabled
+        # NOTE: deliberately NO Google Search grounding tool here. Both agents
+        # must argue from the SAME shared context (Truth = A ∩ B); giving
+        # Gemini private live-web access would break that symmetry. Web
+        # evidence enters the pipeline only through the shared Tavily
+        # grounding phase. (Grounded calls also have a separate, much
+        # smaller free-tier quota, which throttled whole runs.)
         response = gemini_client.models.generate_content(
-            model=config.GEMINI_MODEL,
+            model=model,
             contents=prompt,
             config=types.GenerateContentConfig(
                 temperature=temp,
                 max_output_tokens=tokens,
-                system_instruction=system_prompt,
-                tools=[types.Tool(google_search=types.GoogleSearch())]
+                system_instruction=system_prompt
             )
         )
 
@@ -160,8 +137,52 @@ def call_gemini_api(
         return text
 
     except Exception as e:
-        logger.error(f"Gemini API error: {e}")
+        logger.error(f"Gemini API error ({model}): {e}")
         raise
+
+
+def call_gemini_api(
+    prompt: str,
+    system_prompt: str,
+    temperature: Optional[float] = None,
+    max_tokens: Optional[int] = None
+) -> str:
+    """
+    Call Gemini API with retry logic and an optional fallback model.
+
+    The primary model (GEMINI_MODEL) is tried with exponential backoff;
+    if it is still failing (e.g. 503 "high demand" spikes on the free tier),
+    the call is repeated once more against GEMINI_FALLBACK_MODEL.
+
+    Args:
+        prompt: User message
+        system_prompt: System instruction
+        temperature: Override default temperature
+        max_tokens: Override default max tokens
+
+    Returns:
+        Generated text
+
+    Raises:
+        Exception: If both the primary and the fallback model fail
+    """
+    if not gemini_client:
+        raise ValueError("Google API key not configured")
+
+    temp = temperature if temperature is not None else config.GEMINI_TEMPERATURE
+    tokens = max_tokens if max_tokens is not None else config.GEMINI_MAX_TOKENS
+
+    try:
+        return _generate_gemini_content(config.GEMINI_MODEL, prompt, system_prompt, temp, tokens)
+    except Exception as primary_err:
+        fallback = config.GEMINI_FALLBACK_MODEL
+        if not fallback or fallback == config.GEMINI_MODEL:
+            raise
+        logger.warning(
+            f"Primary Gemini model '{config.GEMINI_MODEL}' exhausted retries "
+            f"({primary_err}); falling back to '{fallback}'"
+        )
+        return _generate_gemini_content(fallback, prompt, system_prompt, temp, tokens)
 
 
 # ═══════════════════════════════════════════════════════════

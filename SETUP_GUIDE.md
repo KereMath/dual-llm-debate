@@ -164,7 +164,8 @@ pip install -r requirements.txt
 ```bash
 # Model seçimi
 CLAUDE_MODEL=claude-sonnet-4-5-20250929
-GEMINI_MODEL=gemini-1.5-pro-latest
+GEMINI_MODEL=gemini-flash-latest
+GEMINI_FALLBACK_MODEL=gemini-flash-lite-latest  # birincil model 503/kota yerse
 
 # Debate parametreleri
 MAX_ROUNDS=3                    # Maksimum tur sayısı (1-5)
