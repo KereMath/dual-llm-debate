@@ -8,7 +8,11 @@ import asyncio
 
 from ..schemas import DebateState
 from ..api_clients import call_gemini_async, call_claude_async
-from ..prompts import SYSTEM_PROMPT_GEMINI_EXPLORER, SYSTEM_PROMPT_CLAUDE_JUDGE
+from ..prompts import (
+    SYSTEM_PROMPT_GEMINI_EXPLORER,
+    SYSTEM_PROMPT_CLAUDE_JUDGE,
+    report_language_instruction,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +46,9 @@ Görev:
 - Her iddia için [Source: <detay>] formatında kaynak belirt
 - Kapsamlı ol ama sadece kaynaklarda olanı yaz
 - Speküle etme, kendi bilgini kullanma
+- Bilgi kaynağının TÜRÜNÜ tartışma (eğitim verisi / offline mod / arama
+  sonuçları gibi meta-yorumlar YASAK) — sadece soruyu cevapla
+- {report_language_instruction(state.report_language)}
 
 Cevabını yaz:"""
 

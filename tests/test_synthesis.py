@@ -73,14 +73,17 @@ class TestSynthesisInputs:
 
         monkeypatch.setattr(phase5, "call_claude_api", fake_claude)
 
-        state = make_state()
+        state = make_state()  # default: auto
+        phase5.phase_5_intersection_synthesis(state)
+        assert "SAME language as the research question" in captured["prompt"]
+
         state.report_language = "en"
         phase5.phase_5_intersection_synthesis(state)
         assert "ENTIRE report in ENGLISH" in captured["prompt"]
 
         state.report_language = "tr"
         phase5.phase_5_intersection_synthesis(state)
-        assert "TAMAMINI TÜRKÇE" in captured["prompt"]
+        assert "ALL prose in TURKISH" in captured["prompt"]
 
     def test_falls_back_to_drafts_when_no_debate_round(self, monkeypatch):
         captured = {}

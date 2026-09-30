@@ -21,7 +21,8 @@ from src.api_clients import (
 from src.prompts import (
     PROMPT_COMPARISON_HANDSHAKE,
     SYSTEM_PROMPT_GEMINI_EXPLORER,
-    SYSTEM_PROMPT_CLAUDE_JUDGE
+    SYSTEM_PROMPT_CLAUDE_JUDGE,
+    report_language_instruction
 )
 
 logger = logging.getLogger(__name__)
@@ -114,7 +115,8 @@ def build_handshake_prompt(
     locked_agreements: List[LockedClaim],
     disputed_points: List[str],
     round_num: int,
-    collaborative_instruction: str
+    collaborative_instruction: str,
+    report_language: str = "auto"
 ) -> str:
     """Build comparison handshake prompt for agent"""
 
@@ -124,6 +126,7 @@ def build_handshake_prompt(
         round_num=round_num,
         agent_name=agent_name,
         topic=topic,
+        language_instruction=report_language_instruction(report_language),
         shared_context=shared_context[:5000],  # Truncate if too long
         locked_agreements=format_locked_agreements(locked_agreements),
         prev_round=prev_round,
@@ -518,7 +521,8 @@ def run_iterative_debate_round(
         locked_agreements=state.locked_agreements,
         disputed_points=state.current_disputed_points,
         round_num=round_num,
-        collaborative_instruction=collaborative_instruction
+        collaborative_instruction=collaborative_instruction,
+        report_language=state.report_language
     )
 
     claude_prompt = build_handshake_prompt(
@@ -530,7 +534,8 @@ def run_iterative_debate_round(
         locked_agreements=state.locked_agreements,
         disputed_points=state.current_disputed_points,
         round_num=round_num,
-        collaborative_instruction=collaborative_instruction
+        collaborative_instruction=collaborative_instruction,
+        report_language=state.report_language
     )
 
     # Call both agents in parallel using threading.

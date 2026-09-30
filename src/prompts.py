@@ -304,12 +304,19 @@ SCORING GUIDE:
 # ═══════════════════════════════════════════════════════════
 
 def report_language_instruction(lang: str) -> str:
-    """One-line language directive injected into synthesis and LaTeX prompts"""
+    """Language directive injected at EVERY stage (drafting, debate,
+    synthesis, LaTeX). The pipeline's own scaffolding is partly Turkish,
+    so without an explicit rule models drift to Turkish on English questions."""
     if lang == "tr":
-        return "ZORUNLU DİL: Raporun TAMAMINI TÜRKÇE yaz (soru hangi dilde olursa olsun)."
+        return ("ZORUNLU DİL / MANDATORY LANGUAGE: Write ALL prose in TURKISH, "
+                "including section headings, regardless of the question's language.")
     if lang == "en":
-        return "MANDATORY LANGUAGE: Write the ENTIRE report in ENGLISH (regardless of the question's language)."
-    return "DİL: Raporu araştırma sorusunun dilinde yaz (soru Türkçeyse Türkçe, İngilizceyse İngilizce)."
+        return ("MANDATORY LANGUAGE: Write the ENTIRE report in ENGLISH, "
+                "including section headings, regardless of the question's language.")
+    return ("LANGUAGE RULE: Write in the SAME language as the research question. "
+            "English question → fully English answer (headings included). "
+            "Türkçe soru → tamamen Türkçe cevap (başlıklar dahil). "
+            "Do NOT default to Turkish just because parts of these instructions are in Turkish.")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -388,6 +395,10 @@ academic narrative with [Source: ...] tags, NOT as a meta-report]
 
 ═══════════════════════════════════════════════════════════
 REMINDER: Write as if YOU are directly answering the question, NOT describing a consensus process.
+REMINDER: Section headings must be in the report's language too — a Turkish
+report uses "Giriş / Bulgular / Sonuç / Kaynaklar", an English report uses
+"Introduction / Findings / Conclusion / References". The template above only
+shows the STRUCTURE, not the heading language.
 ═══════════════════════════════════════════════════════════
 """
 
@@ -405,6 +416,8 @@ YOUR ROLE: {agent_name}
 
 RESEARCH QUESTION:
 {topic}
+
+{language_instruction}
 
 SHARED CONTEXT (Available Sources):
 {shared_context}
