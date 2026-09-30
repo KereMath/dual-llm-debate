@@ -64,6 +64,24 @@ class TestSynthesisInputs:
 
         assert state.consensus_report == "CONSENSUS_TEXT"
 
+    def test_report_language_setting_reaches_the_prompt(self, monkeypatch):
+        captured = {}
+
+        def fake_claude(prompt, system_prompt, temperature=None, max_tokens=None):
+            captured["prompt"] = prompt
+            return "OK"
+
+        monkeypatch.setattr(phase5, "call_claude_api", fake_claude)
+
+        state = make_state()
+        state.report_language = "en"
+        phase5.phase_5_intersection_synthesis(state)
+        assert "ENTIRE report in ENGLISH" in captured["prompt"]
+
+        state.report_language = "tr"
+        phase5.phase_5_intersection_synthesis(state)
+        assert "TAMAMINI TÜRKÇE" in captured["prompt"]
+
     def test_falls_back_to_drafts_when_no_debate_round(self, monkeypatch):
         captured = {}
 

@@ -56,6 +56,11 @@ class DebateState(BaseModel):
         description="V1=offline (no search), V2=internet (Tavily), auto=keyword-based decision"
     )
 
+    report_language: Literal["auto", "tr", "en"] = Field(
+        default="auto",
+        description="Language of the final report: auto=follow the question's language"
+    )
+
     shared_context: str = Field(
         default="",
         description="Web search results or offline notice (immutable after grounding)"

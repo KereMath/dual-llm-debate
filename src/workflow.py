@@ -184,6 +184,7 @@ def run_research(
     research_mode: str = "auto",
     max_rounds: int = None,
     convergence_threshold: float = None,
+    report_language: str = None,
     on_phase: Optional[Callable[[str, DebateState], None]] = None
 ) -> DebateState:
     """
@@ -206,11 +207,14 @@ def run_research(
         max_rounds = config.MAX_ROUNDS
     if convergence_threshold is None:
         convergence_threshold = config.CONVERGENCE_THRESHOLD
+    if report_language is None:
+        report_language = config.REPORT_LANGUAGE
 
     # Initialize state
     initial_state = DebateState(
         topic=topic,
         research_mode=research_mode,
+        report_language=report_language,
         max_rounds=max_rounds,
         convergence_threshold=convergence_threshold,
         start_time=datetime.now()

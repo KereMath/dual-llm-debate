@@ -8,7 +8,11 @@ from typing import List
 
 from ..schemas import DebateState, LockedClaim
 from ..api_clients import call_claude_api
-from ..prompts import SYSTEM_PROMPT_SYNTHESIZER, PROMPT_CONSENSUS_EXTRACTION
+from ..prompts import (
+    SYSTEM_PROMPT_SYNTHESIZER,
+    PROMPT_CONSENSUS_EXTRACTION,
+    report_language_instruction,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +83,8 @@ def phase_5_intersection_synthesis(state: DebateState) -> DebateState:
         disputed_points=disputed_block,
         gemini_final=gemini_final,
         claude_final=claude_final,
-        iteration_counter=state.iteration_counter
+        iteration_counter=state.iteration_counter,
+        language_instruction=report_language_instruction(state.report_language)
     )
 
     try:

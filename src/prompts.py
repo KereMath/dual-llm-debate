@@ -300,6 +300,19 @@ SCORING GUIDE:
 """
 
 # ═══════════════════════════════════════════════════════════
+# REPORT LANGUAGE
+# ═══════════════════════════════════════════════════════════
+
+def report_language_instruction(lang: str) -> str:
+    """One-line language directive injected into synthesis and LaTeX prompts"""
+    if lang == "tr":
+        return "ZORUNLU DİL: Raporun TAMAMINI TÜRKÇE yaz (soru hangi dilde olursa olsun)."
+    if lang == "en":
+        return "MANDATORY LANGUAGE: Write the ENTIRE report in ENGLISH (regardless of the question's language)."
+    return "DİL: Raporu araştırma sorusunun dilinde yaz (soru Türkçeyse Türkçe, İngilizceyse İngilizce)."
+
+
+# ═══════════════════════════════════════════════════════════
 # PROMPT TEMPLATES
 # ═══════════════════════════════════════════════════════════
 
@@ -315,6 +328,7 @@ CRITICAL: The dual-LLM process must be INVISIBLE - write as if a single expert a
 CRITICAL: DO NOT discuss what kind of sources were available. Never write things
 like "Internal Knowledge temelinde", "based on training data", "offline mode",
 "güncel bilgiler için çevrimiçi kaynaklara başvurun". Just answer the question.
+{language_instruction}
 
 Araştırma Sorusu: {topic}
 

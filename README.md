@@ -62,7 +62,7 @@ Docker (installs TeX Live packages and Poppler for you):
 docker compose up --build
 ```
 
-Configuration is environment-driven; `.env.example` lists every setting: model IDs (`CLAUDE_MODEL`, `GEMINI_MODEL`, `GEMINI_FALLBACK_MODEL`), `MAX_ROUNDS`, `CONVERGENCE_THRESHOLD`, `QA_THRESHOLD`, `DEFAULT_RESEARCH_MODE`, `LATEX_TIMEOUT`, `MAX_LATEX_RETRIES`, `MAX_PDF_REGENERATIONS`, and the output directories. Temperatures and token limits are hard-coded in `src/config.py`, not exposed as env vars.
+Configuration is environment-driven; `.env.example` lists every setting: model IDs (`CLAUDE_MODEL`, `GEMINI_MODEL`, `GEMINI_FALLBACK_MODEL`), `MAX_ROUNDS`, `CONVERGENCE_THRESHOLD`, `QA_THRESHOLD`, `DEFAULT_RESEARCH_MODE`, `REPORT_LANGUAGE`, `LATEX_TIMEOUT`, `MAX_LATEX_RETRIES`, `MAX_PDF_REGENERATIONS`, and the output directories. Temperatures and token limits are hard-coded in `src/config.py`, not exposed as env vars.
 
 ## Status & caveats
 
@@ -70,7 +70,7 @@ A personal, experimental prototype. Remaining limitations visible in the code:
 
 - **Text-mode parsing survives only as a fallback.** The debate comparison is schema-enforced (tool-use / `response_schema`); when a structured call errors outright, the round falls back to the legacy free-text protocol, whose parser recovers what it can (salvaging intact claim objects from truncated JSON) and pegs consensus at 0.5 when nothing is recoverable. A fully unparseable fallback round therefore cannot converge, and such runs end at max rounds ("forced stop"). Both paths are covered by tests.
 - **The final PDF has no citations, by design.** Sources are required in the drafts and debate tables, but `strip_citations()` removes all citation markers, reference numbers, and bibliographies from the final LaTeX.
-- **Language.** The web UI is English; agent prompts are a mix of English scaffolding and Turkish instructions, and reports compile with Turkish `babel` support (the report language follows the question's language).
+- **Language.** The web UI is English; agent prompts are a mix of English scaffolding and Turkish instructions, and reports compile with Turkish `babel` support. The final report's language is configurable (`REPORT_LANGUAGE` env var or the "Report language" selector in the UI): `auto` (default) follows the question's language, `tr`/`en` force Turkish/English regardless of the question.
 - **Design docs are historical.** `PLAN.md`, `MASTERPLAN.md`, `IMPLEMENTATION_SUMMARY.md` and `CONSENSUS_SYSTEM.md` are mid-development snapshots (marked as such) and describe some designs that were later changed or dropped; the README and the code are authoritative.
 - **Gemini free tier.** Flash models run on the free tier but with small per-model daily quotas (~20 requests/day; one full pipeline run makes 5-9 Gemini calls). Pro models require a paid plan (their free-tier quota is zero). When the primary model hits a 503 spike or its daily quota, the client retries with backoff and then switches to `GEMINI_FALLBACK_MODEL` once before failing explicitly.
 

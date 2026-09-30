@@ -9,7 +9,7 @@ from datetime import datetime
 
 from ..schemas import DebateState
 from ..api_clients import call_claude_api
-from ..prompts import SYSTEM_PROMPT_LATEX_GENERATOR
+from ..prompts import SYSTEM_PROMPT_LATEX_GENERATOR, report_language_instruction
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +111,8 @@ def latex_generation_node(state: DebateState) -> DebateState:
         state.add_error("LaTeX generation: No consensus report")
         return state
 
+    language_instruction = report_language_instruction(state.report_language)
+
     prompt = f"""Aşağıdaki konsensus raporunu akademik LaTeX dökümanına çevir.
 
 KONSENSUS RAPORU (Markdown):
@@ -133,6 +135,7 @@ GEREKSINIMLER:
 - NO citation commands (\\citep, \\cite, etc.)
 - NO citation numbers [1], [2], etc.
 - Turkish karakterler (ı, ş, ğ, ü, ö, ç, İ, Ş, Ğ, Ü, Ö, Ç) doğal kullan - ESCAPE ETME!
+- {language_instruction}
 - Clean, self-contained academic text
 
 SADECE LaTeX kodu döndür (\\documentclass ile başla, \\end{{document}} ile bitir).

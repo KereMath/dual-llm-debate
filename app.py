@@ -147,6 +147,15 @@ with st.sidebar:
         help="auto: keyword-based decision | internet: Tavily web search | offline: model knowledge only",
     )
 
+    report_language = st.selectbox(
+        "Report language",
+        options=["auto", "tr", "en"],
+        index=0,
+        format_func=lambda v: {"auto": "Auto (follow the question)",
+                               "tr": "Türkçe", "en": "English"}[v],
+        help="Language of the final consensus report and PDF",
+    )
+
     st.markdown("**Debate parameters**")
 
     max_rounds = st.slider(
@@ -265,6 +274,7 @@ if run_clicked:
             research_mode=research_mode,
             max_rounds=max_rounds,
             convergence_threshold=convergence_threshold,
+            report_language=report_language,
             on_phase=on_phase,
         )
         st.session_state.final_state = final_state
@@ -296,6 +306,8 @@ if "final_state" in st.session_state:
     st.markdown("---")
     st.markdown(f"## ❓ {fs.topic}")
     meta_bits = [f"Mode: {fs.research_mode}"]
+    if fs.report_language != "auto":
+        meta_bits.append(f"Report language: {fs.report_language}")
     if fs.start_time:
         meta_bits.append(fs.start_time.strftime("%Y-%m-%d %H:%M"))
     if st.session_state.get("loaded_from"):

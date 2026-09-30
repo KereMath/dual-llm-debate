@@ -68,6 +68,10 @@ class Config(BaseSettings):
         "DEFAULT_RESEARCH_MODE", "auto"
     )
 
+    # Final report language: "auto" follows the question's language,
+    # "tr"/"en" force Turkish/English regardless of the question
+    REPORT_LANGUAGE: Literal["auto", "tr", "en"] = os.getenv("REPORT_LANGUAGE", "auto")
+
     # Auto mode keywords (for decision making)
     TIME_SENSITIVE_KEYWORDS: list[str] = [
         "news", "price", "current", "latest", "bugün", "fiyat",
