@@ -45,8 +45,10 @@ class Config(BaseSettings):
     CLAUDE_TEMPERATURE: float = 0.5  # Higher precision (Judge)
     SYNTHESIZER_TEMPERATURE: float = 0.2  # Minimal creativity (Hakem)
 
-    # Token limits
-    CLAUDE_MAX_TOKENS: int = 4096
+    # Token limits. The structured debate output (full comparison table +
+    # full revised answer in one tool input) needs more headroom than a
+    # plain text answer; truncation shows up as missing required fields.
+    CLAUDE_MAX_TOKENS: int = 8192
     # Thinking-capable Gemini models spend output budget on internal thoughts;
     # too small a limit truncates the visible answer mid-JSON
     GEMINI_MAX_TOKENS: int = 16384

@@ -10,8 +10,14 @@ import json
 import logging
 from typing import Tuple, List, Optional
 
-from src.schemas import DebateState, DebateRound, ComparisonClaim, LockedClaim
-from src.api_clients import call_claude_api, call_gemini_api
+from src.schemas import (
+    DebateState, DebateRound, ComparisonClaim, LockedClaim,
+    DebateComparisonOutput
+)
+from src.api_clients import (
+    call_claude_api, call_gemini_api,
+    call_claude_structured, call_gemini_structured
+)
 from src.prompts import (
     PROMPT_COMPARISON_HANDSHAKE,
     SYSTEM_PROMPT_GEMINI_EXPLORER,
@@ -527,38 +533,57 @@ def run_iterative_debate_round(
         collaborative_instruction=collaborative_instruction
     )
 
-    # Call both agents in parallel using threading
+    # Call both agents in parallel using threading.
+    # STRUCTURED FIRST: the schema is enforced by the API (Claude forced
+    # tool-use, Gemini response_schema), so there is nothing to parse.
+    # Only if a structured call itself fails do we fall back to the free-text
+    # protocol and the regex parser.
     logger.info("  → Gemini and Claude comparing and revising in parallel...")
 
     import concurrent.futures
 
-    def call_gemini():
-        return call_gemini_api(
-            prompt=gemini_prompt,
-            system_prompt=SYSTEM_PROMPT_GEMINI_EXPLORER
-        )
+    comparison_schema = DebateComparisonOutput.model_json_schema()
 
-    def call_claude():
-        return call_claude_api(
-            prompt=claude_prompt,
-            system_prompt=SYSTEM_PROMPT_CLAUDE_JUDGE
-        )
+    def get_gemini_comparison() -> dict:
+        try:
+            data = call_gemini_structured(
+                prompt=gemini_prompt,
+                system_prompt=SYSTEM_PROMPT_GEMINI_EXPLORER,
+                response_model=DebateComparisonOutput,
+            )
+            return DebateComparisonOutput.model_validate(data).as_round_dict()
+        except Exception as e:
+            logger.warning(f"  Gemini structured output failed ({e}); using text fallback")
+            response = call_gemini_api(
+                prompt=gemini_prompt,
+                system_prompt=SYSTEM_PROMPT_GEMINI_EXPLORER
+            )
+            return parse_comparison_response(response)
+
+    def get_claude_comparison() -> dict:
+        try:
+            data = call_claude_structured(
+                prompt=claude_prompt,
+                system_prompt=SYSTEM_PROMPT_CLAUDE_JUDGE,
+                schema=comparison_schema,
+            )
+            return DebateComparisonOutput.model_validate(data).as_round_dict()
+        except Exception as e:
+            logger.warning(f"  Claude structured output failed ({e}); using text fallback")
+            response = call_claude_api(
+                prompt=claude_prompt,
+                system_prompt=SYSTEM_PROMPT_CLAUDE_JUDGE
+            )
+            return parse_comparison_response(response)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        future_gemini = executor.submit(call_gemini)
-        future_claude = executor.submit(call_claude)
+        future_gemini = executor.submit(get_gemini_comparison)
+        future_claude = executor.submit(get_claude_comparison)
 
-        gemini_response = future_gemini.result()
-        claude_response = future_claude.result()
+        gemini_data = future_gemini.result()
+        claude_data = future_claude.result()
 
     logger.info("  → Both agents completed")
-
-    # Parse responses
-    logger.debug(f"Gemini response preview: {gemini_response[:500]}...")
-    gemini_data = parse_comparison_response(gemini_response)
-
-    logger.debug(f"Claude response preview: {claude_response[:500]}...")
-    claude_data = parse_comparison_response(claude_response)
 
     # ═══════════════════════════════════════════════════════════
     # HYBRID CONSENSUS CALCULATION (4 METRICS)

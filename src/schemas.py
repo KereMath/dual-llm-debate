@@ -290,3 +290,39 @@ class LockedClaim(BaseModel):
     source_claude: Optional[str] = Field(default=None)
     locked_round: int = Field(description="Round when this was locked")
     confidence_avg: float = Field(ge=0, le=1, description="Average confidence when locked")
+
+
+# ═══════════════════════════════════════════════════════════
+# STRUCTURED DEBATE OUTPUT (enforced via Claude tool-use and
+# Gemini response_schema — replaces free-text JSON parsing)
+# ═══════════════════════════════════════════════════════════
+
+class ComparisonClaimOutput(BaseModel):
+    """One row of the claim-by-claim comparison table, as the model must emit it"""
+    claim_id: int = Field(description="Unique claim number, same across both agents")
+    resolution: str = Field(description="Short final statement of this claim (max ~200 chars)")
+    status: Literal["agree", "conflict", "partial"] = Field(description="Agreement status")
+    your_confidence: float = Field(description="Your confidence in this claim, 0.0-1.0")
+    other_confidence: float = Field(description="Other agent's apparent confidence, 0.0-1.0")
+    your_source: Optional[str] = Field(default=None, description="Your source URL/reference")
+    other_source: Optional[str] = Field(default=None, description="Other agent's source")
+
+
+class DebateComparisonOutput(BaseModel):
+    """Full structured response for one debate round"""
+    comparison_table: List[ComparisonClaimOutput] = Field(default_factory=list)
+    consensus_score: float = Field(description="Overall agreement estimate, 0.0-1.0")
+    convergence_status: Literal["continue", "converged"] = Field(
+        description="'converged' only if agreement is essentially complete")
+    revised_answer: str = Field(description="Your full revised answer text")
+    new_agreements: List[str] = Field(default_factory=list)
+    still_disputed: List[str] = Field(default_factory=list)
+    next_focus: Optional[str] = Field(default=None)
+
+    def as_round_dict(self) -> dict:
+        """Normalize to the dict shape the debate loop consumes"""
+        data = self.model_dump()
+        data.setdefault("total_claims", len(self.comparison_table))
+        data.setdefault("agreed_claims",
+                        sum(1 for c in self.comparison_table if c.status == "agree"))
+        return data

@@ -112,6 +112,32 @@ st.markdown("---")
 # ═══════════════════════════════════════════════════════════
 
 with st.sidebar:
+    # ── Past researches (chat-style history) ────────────────
+    if st.button("➕ New research", use_container_width=True, type="primary"):
+        st.session_state.pop("final_state", None)
+        st.session_state.pop("loaded_from", None)
+        st.session_state.pop("full_log", None)
+
+    st.markdown("### 📂 Past researches")
+    saved_runs = list_runs()
+    if saved_runs:
+        for run_path in saved_runs[:25]:
+            if st.button(run_label(run_path), key=f"run_{run_path.name}",
+                         use_container_width=True):
+                loaded = load_run(run_path)
+                if loaded:
+                    st.session_state.final_state = loaded
+                    st.session_state.loaded_from = str(run_path)
+                    st.session_state.pop("full_log", None)
+                else:
+                    st.error("Could not load that run file")
+        if len(saved_runs) > 25:
+            st.caption(f"…and {len(saved_runs) - 25} older runs in `output/runs/`")
+    else:
+        st.caption("No past researches yet. Finished runs are saved "
+                   "locally to `output/runs/` and will be listed here.")
+
+    st.markdown("---")
     st.header("⚙️ Settings")
 
     research_mode = st.selectbox(
@@ -154,28 +180,6 @@ with st.sidebar:
         for key in missing_keys:
             st.text(f"  • {key}")
         st.info("Check your `.env` file")
-
-    # ── Run history (local persistence) ─────────────────────
-    st.markdown("---")
-    st.markdown("**📂 Run history**")
-    saved_runs = list_runs()
-    if saved_runs:
-        selected_run = st.selectbox(
-            "Saved runs (this machine)",
-            options=saved_runs,
-            format_func=run_label,
-            help="Every finished run is saved to output/runs/ and survives page refreshes",
-        )
-        if st.button("Load selected run", use_container_width=True):
-            loaded = load_run(selected_run)
-            if loaded:
-                st.session_state.final_state = loaded
-                st.session_state.loaded_from = str(selected_run)
-                st.session_state.pop("full_log", None)
-            else:
-                st.error("Could not load that run file")
-    else:
-        st.caption("No saved runs yet — results are stored locally in `output/runs/`.")
 
 # ═══════════════════════════════════════════════════════════
 # INPUT
@@ -278,25 +282,26 @@ if run_clicked:
 
 # ═══════════════════════════════════════════════════════════
 # RESULTS (rendered from session state so downloads/expanders
-# don't re-trigger a run). On a fresh session — e.g. after a
-# page refresh — the most recent saved run is loaded from disk.
+# don't re-trigger a run). A fresh session starts clean — past
+# researches are opened from the sidebar, chat-app style.
 # ═══════════════════════════════════════════════════════════
 
-if "final_state" not in st.session_state:
-    _runs = list_runs()
-    if _runs:
-        _loaded = load_run(_runs[0])
-        if _loaded:
-            st.session_state.final_state = _loaded
-            st.session_state.loaded_from = str(_runs[0])
+if "final_state" not in st.session_state and not run_clicked:
+    st.info("👋 Ask a research question above — or open one of your past "
+            "researches from the sidebar on the left.")
 
 if "final_state" in st.session_state:
     fs: DebateState = st.session_state.final_state
 
     st.markdown("---")
-    st.markdown("## 📊 Results")
+    st.markdown(f"## ❓ {fs.topic}")
+    meta_bits = [f"Mode: {fs.research_mode}"]
+    if fs.start_time:
+        meta_bits.append(fs.start_time.strftime("%Y-%m-%d %H:%M"))
     if st.session_state.get("loaded_from"):
-        st.caption(f"Loaded from local run history: `{st.session_state.loaded_from}`")
+        meta_bits.append(f"loaded from `{st.session_state.loaded_from}`")
+    st.caption(" · ".join(meta_bits))
+    st.markdown("## 📊 Results")
 
     # Verdict banner
     if fs.qa_failed:

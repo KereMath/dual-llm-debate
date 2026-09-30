@@ -492,6 +492,11 @@ CRITICAL RULES:
 OUTPUT FORMAT - TWO PARTS (JSON + TEXT):
 ═══════════════════════════════════════════════════════════
 
+⚠️ IF you are given a structured output tool or response schema, FILL THAT
+INSTEAD of the two-part format below (put your full revised answer in the
+schema's "revised_answer" field, and one short "resolution" sentence per
+claim). The two-part format below applies ONLY when no schema is enforced.
+
 ⚠️ CRITICAL JSON RULES TO PREVENT PARSE ERRORS:
 🚨 JSON MUST BE 100% VALID - System will FAIL if malformed!
 - Keep all JSON strings SHORT (max 50 chars per field; EXCEPTION: "resolution" may be up to 200 chars)

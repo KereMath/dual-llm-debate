@@ -186,6 +186,128 @@ def call_gemini_api(
 
 
 # ═══════════════════════════════════════════════════════════
+# STRUCTURED OUTPUT CALLS
+# The debate round's comparison is schema-enforced instead of
+# parsed out of free text: Claude via forced tool-use, Gemini
+# via response_schema. The regex parser remains only as a
+# fallback for these calls failing outright.
+# ═══════════════════════════════════════════════════════════
+
+@retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=2, min=4, max=60),
+    reraise=True
+)
+def call_claude_structured(
+    prompt: str,
+    system_prompt: str,
+    schema: dict,
+    tool_name: str = "submit_comparison",
+    temperature: Optional[float] = None,
+    max_tokens: Optional[int] = None
+) -> dict:
+    """
+    Call Claude with a forced tool-use so the response IS the schema.
+
+    Returns:
+        The tool input as a dict (guaranteed to match the JSON schema)
+    """
+    if not anthropic_client:
+        raise ValueError("Anthropic API key not configured")
+
+    temp = temperature if temperature is not None else config.CLAUDE_TEMPERATURE
+    tokens = max_tokens if max_tokens is not None else config.CLAUDE_MAX_TOKENS
+
+    response = anthropic_client.messages.create(
+        model=config.CLAUDE_MODEL,
+        max_tokens=tokens,
+        temperature=temp,
+        system=system_prompt,
+        messages=[{"role": "user", "content": prompt}],
+        tools=[{
+            "name": tool_name,
+            "description": "Submit the structured claim-by-claim comparison for this debate round",
+            "input_schema": schema,
+        }],
+        tool_choice={"type": "tool", "name": tool_name},
+    )
+
+    for block in response.content:
+        if block.type == "tool_use":
+            return block.input
+
+    raise ValueError("Claude returned no tool_use block despite forced tool_choice")
+
+
+@retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=3, min=10, max=90),
+    reraise=True
+)
+def _generate_gemini_structured(model: str, prompt: str, system_prompt: str,
+                                response_model, temp: float, tokens: int) -> dict:
+    """Single-model structured Gemini call (response_schema-enforced JSON)"""
+    import json as _json
+
+    response = gemini_client.models.generate_content(
+        model=model,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            temperature=temp,
+            max_output_tokens=tokens,
+            system_instruction=system_prompt,
+            response_mime_type="application/json",
+            response_schema=response_model,
+        )
+    )
+
+    parsed = getattr(response, "parsed", None)
+    if parsed is not None:
+        return parsed.model_dump() if hasattr(parsed, "model_dump") else parsed
+    if response.text:
+        return _json.loads(response.text)
+    raise ValueError("No structured response from Gemini API")
+
+
+def call_gemini_structured(
+    prompt: str,
+    system_prompt: str,
+    response_model,
+    temperature: Optional[float] = None,
+    max_tokens: Optional[int] = None
+) -> dict:
+    """
+    Structured Gemini call with the same primary/fallback-model policy
+    as call_gemini_api.
+
+    Args:
+        response_model: a Pydantic model class describing the output schema
+
+    Returns:
+        Dict matching the schema
+    """
+    if not gemini_client:
+        raise ValueError("Google API key not configured")
+
+    temp = temperature if temperature is not None else config.GEMINI_TEMPERATURE
+    tokens = max_tokens if max_tokens is not None else config.GEMINI_MAX_TOKENS
+
+    try:
+        return _generate_gemini_structured(config.GEMINI_MODEL, prompt, system_prompt,
+                                           response_model, temp, tokens)
+    except Exception as primary_err:
+        fallback = config.GEMINI_FALLBACK_MODEL
+        if not fallback or fallback == config.GEMINI_MODEL:
+            raise
+        logger.warning(
+            f"Primary Gemini model '{config.GEMINI_MODEL}' failed structured call "
+            f"({primary_err}); falling back to '{fallback}'"
+        )
+        return _generate_gemini_structured(fallback, prompt, system_prompt,
+                                           response_model, temp, tokens)
+
+
+# ═══════════════════════════════════════════════════════════
 # GEMINI VISION API (for PDF QA)
 # ═══════════════════════════════════════════════════════════
 
